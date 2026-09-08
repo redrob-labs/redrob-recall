@@ -33,7 +33,13 @@ Application data is stored in `~/.redrob/vectordb`:
 - `models/` — downloaded local embedding model
 - `local-api-token` — generated local API bearer token (`0600` on Unix)
 
-Original files are never copied into this directory.
+Original files are never copied into this directory. Consistent metadata backups are retained under `~/.redrob/vectordb/backups`; see [Backup and recovery](docs/RECOVERY.md).
+
+## Reliability and recovery
+
+Redrob VectorDB validates its metadata database at startup, applies ordered schema migrations, and creates a pre-migration backup. Documents remain pending until their semantic vectors are committed, so an interrupted index can be repaired on the next scan. Damaged derived indexes are quarantined rather than silently overwritten, and disconnected watched drives are not treated as deleted libraries.
+
+Use **Settings → Storage** to run a health check or create a manual metadata backup. Backups include extracted passages and paths and should be protected with operating-system full-disk encryption.
 
 ## Run for development
 
@@ -70,12 +76,16 @@ The first real index or search downloads the multilingual embedding model. After
 
 ## Build installers
 
+Unsigned local development bundles can be built with:
+
 ```bash
 npm ci
 npm run tauri build
 ```
 
-Tauri writes platform bundles under `src-tauri/target/release/bundle/`. Production distribution still requires the appropriate platform signing credentials: Apple signing/notarization for macOS and a code-signing certificate for Windows.
+Tauri writes platform bundles under `src-tauri/target/release/bundle/`. Production installers are created only by the reviewed **Signed desktop release** workflow. It requires the external updater, Apple, and Windows signing secrets documented in [the release guide](docs/RELEASING.md); missing credentials stop the release instead of publishing unsigned artifacts.
+
+Published builds check the signed stable update channel from **Settings → Updates**. Update metadata and installer signatures are verified by Tauri before installation. Local development builds intentionally have no update key or endpoint configured.
 
 ### Qdrant Edge compiler compatibility
 
@@ -125,21 +135,25 @@ Changing the Local API switch or port takes effect after restarting Redrob Vecto
 ## Useful commands
 
 ```bash
-npm run build                    # TypeScript and production frontend build
-npm run check                    # TypeScript and Rust checks
+npm run check                    # TypeScript and locked Rust checks
+npm run check:version            # Ensure all release versions match
+npm run test:rust                # Migration, validation, and API error tests
+npm run verify                   # Full build, audits, formatting, tests, and Clippy
 npm run format                   # Prettier and rustfmt
 npm audit                        # JavaScript dependency audit
-cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings
+cargo clippy --locked --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings
 ```
 
 ## Licensing and attribution
 
 Redrob VectorDB application code is proprietary unless Redrob publishes a different license. Embedded open-source components retain their own licenses. See [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md). Qdrant and Qdrant Edge are projects of Qdrant Solutions GmbH; Redrob VectorDB is a Redrob product and is not presented as an official Qdrant distribution.
 
-
 ## Project documentation
 
 - [Architecture and trust boundaries](docs/ARCHITECTURE.md)
+- [Signed release process](docs/RELEASING.md)
+- [Backup and recovery](docs/RECOVERY.md)
+- [Release QA checklist](docs/QA_CHECKLIST.md)
 - [Privacy and deletion](PRIVACY.md)
 - [Security policy](SECURITY.md)
 - [Changelog](CHANGELOG.md)
@@ -151,4 +165,4 @@ Before publishing a build, run the full local verification command:
 npm run verify
 ```
 
-This runs the production frontend build, JavaScript dependency audit, Rust formatting check, and Clippy with warnings treated as errors. Linux hosts must have the Tauri native development packages installed first.
+This runs version consistency checks, the production frontend build, JavaScript dependency audit, Rust formatting, Rust tests, and Clippy with warnings treated as errors. Linux hosts must have the Tauri native development packages installed first. CI separately runs the RustSec advisory database against the locked dependency graph.

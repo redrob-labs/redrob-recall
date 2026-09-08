@@ -52,18 +52,26 @@ pub async fn start_full_index(state: AppState) -> Result<()> {
     if !state.set_indexing(true) {
         return Ok(());
     }
+    start_claimed_full_index(state).await
+}
+
+pub(crate) async fn start_claimed_full_index(state: AppState) -> Result<()> {
     state.set_paused(false);
     let worker_state = state.clone();
-    let result =
-        tauri::async_runtime::spawn_blocking(move || run_full_index(&worker_state)).await?;
+    let result = tauri::async_runtime::spawn_blocking(move || run_full_index(&worker_state)).await;
     state.set_current_file(None);
     state.set_indexing(false);
     state.emit_snapshot();
-    result
+    result?
 }
 
 fn run_full_index(state: &AppState) -> Result<()> {
     let settings = state.settings();
+    settings.validate()?;
+    let all_roots_available = settings
+        .library_paths
+        .iter()
+        .all(|root| Path::new(root).is_dir());
     emit_progress(
         state,
         IndexProgress {
@@ -131,8 +139,14 @@ fn run_full_index(state: &AppState) -> Result<()> {
     }
 
     if !state.is_paused() {
-        if let Ok(stale_ids) = state.storage().remove_missing_documents(&all_paths) {
-            let _ = delete_points(state, &stale_ids);
+        if all_roots_available {
+            if let Ok(stale_ids) = state.storage().remove_missing_documents(&all_paths) {
+                let _ = delete_points(state, &stale_ids);
+            }
+        } else {
+            tracing::warn!(
+                "one or more library folders are unavailable; preserving their indexed records"
+            );
         }
         let _ = state.with_shard(|shard| shard.optimize().map(|_| ()).map_err(Into::into));
     }
@@ -163,7 +177,10 @@ fn discover_files(settings: &crate::models::AppSettings) -> Result<Vec<PathBuf>>
         .iter()
         .map(|extension| extension.to_ascii_lowercase())
         .collect::<std::collections::HashSet<_>>();
-    let max_bytes = settings.max_file_size_mb * 1024 * 1024;
+    let max_bytes = settings
+        .max_file_size_mb
+        .checked_mul(1024 * 1024)
+        .context("maximum file size is too large")?;
     let excluded = settings.excluded_paths.clone();
     let mut files = Vec::new();
 
@@ -186,7 +203,13 @@ fn discover_files(settings: &crate::models::AppSettings) -> Result<Vec<PathBuf>>
                     .any(|excluded| excluded == &value)
             })
         });
-        for entry in builder.build().flatten() {
+        for entry in builder.build() {
+            let entry = entry.with_context(|| {
+                format!(
+                    "could not completely scan library folder {}",
+                    root_path.display()
+                )
+            })?;
             if !entry.file_type().is_some_and(|kind| kind.is_file()) {
                 continue;
             }
@@ -217,8 +240,22 @@ fn index_file(state: &AppState, path: &Path) -> Result<()> {
 
     let sections = extract_sections(path)?;
     let settings = state.settings();
+    let extracted_characters = sections.iter().try_fold(0usize, |total, section| {
+        total.checked_add(section.text.chars().count())
+    });
+    let extraction_limit = (settings.max_file_size_mb as usize)
+        .saturating_mul(4)
+        .saturating_mul(1024 * 1024);
+    anyhow::ensure!(
+        extracted_characters.is_some_and(|count| count <= extraction_limit),
+        "extracted text exceeds the safe processing limit"
+    );
     let chunks = chunk_sections(sections, settings.chunk_size, settings.chunk_overlap);
     anyhow::ensure!(!chunks.is_empty(), "no readable text was found");
+    anyhow::ensure!(
+        chunks.len() <= 50_000,
+        "document produced too many passages"
+    );
     let content_hash = hash_chunks(&chunks);
     let name = path
         .file_name()
@@ -272,6 +309,7 @@ fn index_file(state: &AppState, path: &Path) -> Result<()> {
                 .map_err(Into::into)
         })?;
     }
+    state.storage().mark_vectors_ready(&path_string)?;
     Ok(())
 }
 
@@ -347,13 +385,12 @@ fn extract_docx(path: &Path) -> Result<Vec<ParsedSection>> {
     loop {
         match reader.read_event() {
             Ok(Event::Text(text)) => {
-                let decoded = text.decode()?;
                 if !current.is_empty() {
                     current.push(' ');
                 }
-                current.push_str(&decoded);
+                current.push_str(text.as_ref());
             }
-            Ok(Event::End(end)) if end.name().as_ref() == b"w:p" => {
+            Ok(Event::End(end)) if end.name().as_ref() == "w:p" => {
                 let paragraph = clean_text(&current);
                 if !paragraph.is_empty() {
                     paragraphs.push(paragraph);
@@ -380,11 +417,10 @@ fn extract_markup(path: &Path) -> Result<Vec<ParsedSection>> {
     loop {
         match reader.read_event() {
             Ok(Event::Text(text)) => {
-                let decoded = text.decode()?;
                 if !output.is_empty() {
                     output.push(' ');
                 }
-                output.push_str(&decoded);
+                output.push_str(text.as_ref());
             }
             Ok(Event::Eof) => break,
             Err(_) => return extract_plain_text(path),

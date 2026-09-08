@@ -44,11 +44,27 @@ pub fn add_library_path(path: String, state: State<'_, AppState>) -> Result<(), 
 
 #[tauri::command]
 pub fn remove_library_path(path: String, state: State<'_, AppState>) -> Result<(), String> {
+    if !state.set_indexing(true) {
+        return Err("Wait for indexing to finish before removing a library folder".into());
+    }
     let mut settings = state.settings();
     settings
         .library_paths
         .retain(|candidate| candidate != &path);
-    state.update_settings(settings).map_err(command_error)
+    if let Err(error) = state.persist_settings(settings) {
+        state.set_indexing(false);
+        state.emit_snapshot();
+        return Err(command_error(error));
+    }
+    let watcher_result = indexer::configure_watcher(state.inner());
+    state.emit_snapshot();
+    let state = state.inner().clone();
+    tauri::async_runtime::spawn(async move {
+        if let Err(error) = indexer::start_claimed_full_index(state).await {
+            tracing::error!(%error, "library reconciliation failed after removing a folder");
+        }
+    });
+    watcher_result.map_err(command_error)
 }
 
 #[tauri::command]
@@ -88,10 +104,8 @@ pub async fn search_library(
 pub async fn ask_library(
     request: AskRequest,
     state: State<'_, AppState>,
-) -> Result<AskResponse, String> {
-    redrob::ask(state.inner().clone(), request)
-        .await
-        .map_err(command_error)
+) -> Result<AskResponse, redrob::RedrobError> {
+    redrob::ask(state.inner().clone(), request).await
 }
 
 #[tauri::command]
@@ -112,22 +126,16 @@ pub fn get_sources(ids: Vec<u64>, state: State<'_, AppState>) -> Result<Vec<Chun
 }
 
 #[tauri::command]
-pub fn open_source(path: String, app: AppHandle) -> Result<(), String> {
-    let source = PathBuf::from(&path);
-    if !source.exists() {
-        return Err("That source file no longer exists".into());
-    }
+pub fn open_source(path: String, app: AppHandle, state: State<'_, AppState>) -> Result<(), String> {
+    let source = validated_source(&path, &state)?;
     app.opener()
         .open_path(source.to_string_lossy(), None::<&str>)
         .map_err(command_error)
 }
 
 #[tauri::command]
-pub fn reveal_source(path: String) -> Result<(), String> {
-    let source = PathBuf::from(&path);
-    if !source.exists() {
-        return Err("That source file no longer exists".into());
-    }
+pub fn reveal_source(path: String, state: State<'_, AppState>) -> Result<(), String> {
+    let source = validated_source(&path, &state)?;
     #[cfg(target_os = "windows")]
     std::process::Command::new("explorer")
         .arg(format!("/select,{}", source.display()))
@@ -170,6 +178,39 @@ pub fn disconnect_redrob(state: State<'_, AppState>) -> ConnectionStatus {
 #[tauri::command]
 pub fn get_connection_status(state: State<'_, AppState>) -> ConnectionStatus {
     state.connection_status()
+}
+
+#[tauri::command]
+pub fn create_library_backup(state: State<'_, AppState>) -> Result<String, String> {
+    if state.is_indexing() {
+        return Err("Pause indexing before creating a backup".into());
+    }
+    state.storage().integrity_check().map_err(command_error)?;
+    state
+        .storage()
+        .create_backup()
+        .map(|path| path.to_string_lossy().to_string())
+        .map_err(command_error)
+}
+
+#[tauri::command]
+pub fn check_library_health(state: State<'_, AppState>) -> Result<String, String> {
+    state.storage().integrity_check().map_err(command_error)?;
+    Ok("Local metadata and document references passed their integrity checks".into())
+}
+
+fn validated_source(path: &str, state: &AppState) -> Result<PathBuf, String> {
+    let source = std::fs::canonicalize(path).map_err(|_| "That source file no longer exists")?;
+    if !source.is_file() {
+        return Err("That source is not a file".into());
+    }
+    let allowed = state.settings().library_paths.iter().any(|root| {
+        std::fs::canonicalize(root).is_ok_and(|canonical_root| source.starts_with(canonical_root))
+    });
+    if !allowed {
+        return Err("That file is outside your selected library folders".into());
+    }
+    Ok(source)
 }
 
 #[tauri::command]

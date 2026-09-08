@@ -1,6 +1,8 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { openUrl } from "@tauri-apps/plugin-opener";
+import { relaunch } from "@tauri-apps/plugin-process";
+import { check, type Update } from "@tauri-apps/plugin-updater";
 import type {
   AppSettings,
   AppSnapshot,
@@ -47,6 +49,7 @@ const demoEnabled =
   typeof window !== "undefined" &&
   new URLSearchParams(window.location.search).has("demo");
 let mockConnected = demoEnabled;
+let pendingUpdate: Update | null = null;
 let mockSettings: AppSettings = demoEnabled
   ? {
       ...defaultSettings,
@@ -224,6 +227,37 @@ export const bridge = {
   async openExternal(url: string): Promise<void> {
     if (isDesktop) return openUrl(url);
     window.open(url, "_blank", "noopener,noreferrer");
+  },
+  async createBackup(): Promise<string> {
+    if (isDesktop) return invoke("create_library_backup");
+    return "~/.redrob/vectordb/backups/demo-backup.db";
+  },
+  async checkLibraryHealth(): Promise<string> {
+    if (isDesktop) return invoke("check_library_health");
+    return "Local metadata and document references passed their integrity checks";
+  },
+  async checkForUpdate(): Promise<{
+    version: string;
+    notes?: string;
+  } | null> {
+    if (!isDesktop) return null;
+    pendingUpdate = await check({ timeout: 30_000 });
+    return pendingUpdate
+      ? { version: pendingUpdate.version, notes: pendingUpdate.body }
+      : null;
+  },
+  async installPendingUpdate(
+    onProgress?: (downloaded: number, total?: number) => void,
+  ): Promise<void> {
+    if (!pendingUpdate) throw new Error("Check for an update first.");
+    let downloaded = 0;
+    let total: number | undefined;
+    await pendingUpdate.downloadAndInstall((event) => {
+      if (event.event === "Started") total = event.data.contentLength;
+      if (event.event === "Progress") downloaded += event.data.chunkLength;
+      onProgress?.(downloaded, total);
+    });
+    await relaunch();
   },
   async clearLibrary(): Promise<void> {
     if (isDesktop) return invoke("clear_library");

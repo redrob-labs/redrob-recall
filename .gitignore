@@ -20,6 +20,11 @@ src-tauri/target/
 .env
 .env.*
 !.env.example
+src-tauri/tauri.release.conf.json
+*.p12
+*.pfx
+*.key
+*.cer
 .DS_Store
 Thumbs.db
 .vscode/

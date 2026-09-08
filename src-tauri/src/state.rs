@@ -42,9 +42,28 @@ impl AppState {
         let base_dirs = BaseDirs::new().context("home directory is unavailable")?;
         let data_dir = base_dirs.home_dir().join(".redrob").join("vectordb");
         std::fs::create_dir_all(&data_dir)?;
-        let storage = Storage::open(&data_dir.join("metadata.db"))?;
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(&data_dir, std::fs::Permissions::from_mode(0o700))?;
+        }
+        let metadata_path = data_dir.join("metadata.db");
+        let storage = match Storage::open(&metadata_path) {
+            Ok(storage) => storage,
+            Err(error) => {
+                if !metadata_path.is_file() || !Storage::is_confirmed_corrupt(&metadata_path) {
+                    return Err(error);
+                }
+                let quarantine = quarantine_metadata_database(&metadata_path)?;
+                tracing::error!(%error, destination = %quarantine.display(), "metadata database was quarantined and will be rebuilt");
+                Storage::open(&metadata_path)?
+            }
+        };
         let settings = storage.load_settings()?;
-        let shard = open_shard(&data_dir.join("qdrant-edge"))?;
+        let (shard, recovered_shard) = open_shard(&data_dir.join("qdrant-edge"))?;
+        if recovered_shard {
+            storage.mark_all_vectors_pending()?;
+        }
         let embedder = LocalEmbedder::new(&data_dir.join("models"));
         let api_key = load_api_key().ok();
 
@@ -114,9 +133,14 @@ impl AppState {
         self.0.settings.read().clone()
     }
 
-    pub fn update_settings(&self, settings: AppSettings) -> Result<()> {
+    pub(crate) fn persist_settings(&self, settings: AppSettings) -> Result<()> {
         self.0.storage.save_settings(&settings)?;
         *self.0.settings.write() = settings;
+        Ok(())
+    }
+
+    pub fn update_settings(&self, settings: AppSettings) -> Result<()> {
+        self.persist_settings(settings)?;
         indexer::configure_watcher(self)?;
         self.emit_snapshot();
         Ok(())
@@ -234,16 +258,61 @@ impl AppState {
         if path.exists() {
             std::fs::remove_dir_all(&path)?;
         }
-        *self.0.shard.lock() = Some(open_shard(&path)?);
+        let (shard, _) = open_shard(&path)?;
+        *self.0.shard.lock() = Some(shard);
         Ok(())
     }
 }
 
-fn open_shard(path: &Path) -> Result<EdgeShard> {
+fn quarantine_metadata_database(path: &Path) -> Result<PathBuf> {
+    let parent = path
+        .parent()
+        .context("metadata database has no parent directory")?;
+    let destination = parent.join(format!(
+        "metadata-corrupt-{}-{}.db",
+        chrono::Utc::now().format("%Y%m%dT%H%M%SZ"),
+        uuid::Uuid::new_v4().simple()
+    ));
+    std::fs::rename(path, &destination)
+        .context("failed to quarantine the damaged metadata database")?;
+    for suffix in ["-wal", "-shm"] {
+        let sidecar = path_with_suffix(path, suffix);
+        if sidecar.try_exists()? {
+            let sidecar_destination = path_with_suffix(&destination, suffix);
+            std::fs::rename(&sidecar, &sidecar_destination).with_context(|| {
+                format!(
+                    "failed to quarantine metadata sidecar {}",
+                    sidecar.display()
+                )
+            })?;
+        }
+    }
+    Ok(destination)
+}
+
+fn path_with_suffix(path: &Path, suffix: &str) -> PathBuf {
+    let mut value = path.as_os_str().to_os_string();
+    value.push(suffix);
+    PathBuf::from(value)
+}
+
+fn open_shard(path: &Path) -> Result<(EdgeShard, bool)> {
     std::fs::create_dir_all(path)?;
     let has_data = std::fs::read_dir(path)?.next().transpose()?.is_some();
     if has_data {
-        return EdgeShard::load(path, None).context("failed to load the local Qdrant Edge index");
+        match EdgeShard::load(path, None) {
+            Ok(shard) => return Ok((shard, false)),
+            Err(error) => {
+                let quarantine = path.with_file_name(format!(
+                    "qdrant-edge-corrupt-{}",
+                    chrono::Utc::now().format("%Y%m%dT%H%M%SZ")
+                ));
+                tracing::error!(%error, destination = %quarantine.display(), "local vector index was quarantined and will be rebuilt");
+                std::fs::rename(path, &quarantine)
+                    .context("failed to quarantine the damaged local vector index")?;
+                std::fs::create_dir_all(path)?;
+            }
+        }
     }
     let config = EdgeConfigBuilder::new()
         .on_disk_payload(true)
@@ -255,7 +324,9 @@ fn open_shard(path: &Path) -> Result<EdgeShard> {
         )
         .max_search_threads(4)
         .build();
-    EdgeShard::new(path, config).context("failed to create the local Qdrant Edge index")
+    let shard =
+        EdgeShard::new(path, config).context("failed to create the local Qdrant Edge index")?;
+    Ok((shard, true))
 }
 
 fn load_api_key() -> Result<String> {

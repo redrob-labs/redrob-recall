@@ -13,12 +13,15 @@ use axum::{
 };
 use serde::Serialize;
 use std::{net::SocketAddr, sync::Arc};
+use tokio::sync::Semaphore;
 use uuid::Uuid;
 
 #[derive(Clone)]
 struct ApiContext {
     state: AppState,
     token: Arc<String>,
+    search_limit: Arc<Semaphore>,
+    ask_limit: Arc<Semaphore>,
 }
 
 pub async fn serve(state: AppState) -> Result<()> {
@@ -30,6 +33,8 @@ pub async fn serve(state: AppState) -> Result<()> {
     let context = ApiContext {
         state: state.clone(),
         token,
+        search_limit: Arc::new(Semaphore::new(4)),
+        ask_limit: Arc::new(Semaphore::new(2)),
     };
     let router = Router::new()
         .route("/health", get(health))
@@ -61,10 +66,15 @@ async fn health(State(context): State<ApiContext>, headers: HeaderMap) -> impl I
                 "chunks": snapshot.stats.indexed_chunks,
             })),
         ),
-        Err(error) => (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(serde_json::json!({"status": "error", "message": error.to_string()})),
-        ),
+        Err(error) => {
+            tracing::error!(%error, "local API health check failed");
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(
+                    serde_json::json!({"status": "error", "message": "local service health check failed"}),
+                ),
+            )
+        }
     }
 }
 
@@ -76,14 +86,34 @@ async fn search_handler(
     if !authorized(&headers, &context.token) {
         return api_error(StatusCode::UNAUTHORIZED, "invalid local API token");
     }
+    let Ok(permit) = context.search_limit.clone().try_acquire_owned() else {
+        return api_error(
+            StatusCode::TOO_MANY_REQUESTS,
+            "too many search requests are already running",
+        );
+    };
     let state = context.state.clone();
-    match tokio::task::spawn_blocking(move || search::search(&state, request)).await {
+    match tokio::task::spawn_blocking(move || {
+        let _permit = permit;
+        search::search(&state, request)
+    })
+    .await
+    {
         Ok(Ok(results)) => (
             StatusCode::OK,
             Json(serde_json::json!({ "results": results })),
         ),
-        Ok(Err(error)) => api_error(StatusCode::BAD_REQUEST, &error.to_string()),
-        Err(error) => api_error(StatusCode::INTERNAL_SERVER_ERROR, &error.to_string()),
+        Ok(Err(error)) => {
+            tracing::warn!(%error, "local API search rejected");
+            api_error(
+                StatusCode::BAD_REQUEST,
+                "search request could not be completed",
+            )
+        }
+        Err(error) => {
+            tracing::error!(%error, "local API search worker failed");
+            api_error(StatusCode::INTERNAL_SERVER_ERROR, "search service failed")
+        }
     }
 }
 
@@ -95,9 +125,26 @@ async fn ask_handler(
     if !authorized(&headers, &context.token) {
         return api_error(StatusCode::UNAUTHORIZED, "invalid local API token");
     }
+    let Ok(_permit) = context.ask_limit.clone().try_acquire_owned() else {
+        return api_error(
+            StatusCode::TOO_MANY_REQUESTS,
+            "too many Ask requests are already running",
+        );
+    };
     match redrob::ask(context.state, request).await {
         Ok(answer) => (StatusCode::OK, Json(serde_json::json!(answer))),
-        Err(error) => api_error(StatusCode::BAD_REQUEST, &error.to_string()),
+        Err(error) => {
+            let status = StatusCode::from_u16(error.http_status)
+                .unwrap_or(StatusCode::INTERNAL_SERVER_ERROR);
+            (
+                status,
+                Json(serde_json::json!({
+                    "error": error.message,
+                    "code": error.code,
+                    "retryAfterSeconds": error.retry_after_seconds,
+                })),
+            )
+        }
     }
 }
 
@@ -116,15 +163,37 @@ fn api_error(status: StatusCode, message: &str) -> (StatusCode, Json<serde_json:
 fn load_or_create_token(state: &AppState) -> Result<String> {
     let path = state.data_dir().join("local-api-token");
     if path.exists() {
-        return Ok(std::fs::read_to_string(path)?.trim().to_string());
+        let token = std::fs::read_to_string(&path)?.trim().to_string();
+        anyhow::ensure!(
+            token.starts_with("rrv_local_") && token.len() >= 40,
+            "local API token file is invalid"
+        );
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600))?;
+        }
+        return Ok(token);
     }
     let token = format!("rrv_local_{}", Uuid::new_v4().simple());
-    std::fs::write(&path, &token)?;
+    let temporary = state
+        .data_dir()
+        .join(format!(".local-api-token-{}", Uuid::new_v4().simple()));
+    {
+        use std::io::Write;
+        let mut file = std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&temporary)?;
+        file.write_all(token.as_bytes())?;
+        file.sync_all()?;
+    }
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
-        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600))?;
+        std::fs::set_permissions(&temporary, std::fs::Permissions::from_mode(0o600))?;
     }
+    std::fs::rename(&temporary, &path)?;
     Ok(token)
 }
 
