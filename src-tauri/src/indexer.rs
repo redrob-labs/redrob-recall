@@ -385,13 +385,12 @@ fn extract_docx(path: &Path) -> Result<Vec<ParsedSection>> {
     loop {
         match reader.read_event() {
             Ok(Event::Text(text)) => {
-                let decoded = text.decode()?;
                 if !current.is_empty() {
                     current.push(' ');
                 }
-                current.push_str(&decoded);
+                current.push_str(text.as_ref());
             }
-            Ok(Event::End(end)) if end.name().as_ref() == b"w:p" => {
+            Ok(Event::End(end)) if end.name().as_ref() == "w:p" => {
                 let paragraph = clean_text(&current);
                 if !paragraph.is_empty() {
                     paragraphs.push(paragraph);
@@ -418,11 +417,10 @@ fn extract_markup(path: &Path) -> Result<Vec<ParsedSection>> {
     loop {
         match reader.read_event() {
             Ok(Event::Text(text)) => {
-                let decoded = text.decode()?;
                 if !output.is_empty() {
                     output.push(' ');
                 }
-                output.push_str(&decoded);
+                output.push_str(text.as_ref());
             }
             Ok(Event::Eof) => break,
             Err(_) => return extract_plain_text(path),
