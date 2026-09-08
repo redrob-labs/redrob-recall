@@ -30,7 +30,8 @@ pub fn run() {
         }))
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
-        .plugin(tauri_plugin_shell::init())
+        .plugin(tauri_plugin_updater::Builder::new().build())
+        .plugin(tauri_plugin_process::init())
         .setup(|app| {
             let handle = app.handle().clone();
             let app_state = AppState::initialize(handle.clone())?;
@@ -55,6 +56,8 @@ pub fn run() {
             commands::connect_with_api_key,
             commands::disconnect_redrob,
             commands::get_connection_status,
+            commands::create_library_backup,
+            commands::check_library_health,
             commands::clear_library,
         ])
         .build(tauri::generate_context!())

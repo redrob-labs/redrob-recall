@@ -1113,6 +1113,30 @@ kbd {
   color: var(--subtle);
   font-size: 10px;
 }
+.ask-error {
+  display: flex;
+  width: min(820px, 100%);
+  align-items: center;
+  gap: 9px;
+  margin: 10px auto 0;
+  padding: 10px 12px;
+  border: 1px solid #f1ccd1;
+  border-radius: 10px;
+  color: #8d2635;
+  background: #fff6f7;
+  font-size: 10px;
+}
+.ask-error span {
+  flex: 1;
+}
+.ask-error button {
+  display: grid;
+  padding: 2px;
+  border: 0;
+  color: inherit;
+  background: transparent;
+  cursor: pointer;
+}
 .thinking {
   display: grid;
   min-width: 390px;
@@ -1666,12 +1690,18 @@ kbd {
   gap: 3px;
 }
 .storage-summary {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 12px;
+}
+.storage-facts {
   display: grid;
-  grid-template-columns: 0.65fr 1.35fr auto;
-  align-items: center;
+  min-width: 0;
+  grid-template-columns: minmax(90px, 0.65fr) minmax(160px, 1.35fr);
   gap: 20px;
 }
-.storage-summary > div {
+.storage-facts > div {
   display: grid;
   min-width: 0;
   gap: 3px;
@@ -1685,6 +1715,15 @@ kbd {
 .storage-summary span {
   color: var(--subtle);
   font-size: 8px;
+}
+.storage-summary > .storage-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 7px;
+}
+.storage-actions button {
+  white-space: nowrap;
 }
 .danger-button {
   min-height: 34px;
@@ -1705,6 +1744,9 @@ kbd {
   padding: 10px 4px;
   color: #aaa4af;
   font-size: 8px;
+}
+.compact-connection-action {
+  display: none;
 }
 
 /* Modal, progress, system states */
@@ -2073,5 +2115,15 @@ kbd {
     animation-duration: 0.01ms !important;
     animation-iteration-count: 1 !important;
     transition-duration: 0.01ms !important;
+  }
+}
+
+@media (max-width: 1000px) {
+  .compact-connection-action {
+    position: fixed;
+    z-index: 45;
+    top: 18px;
+    right: 24px;
+    display: inline-flex;
   }
 }

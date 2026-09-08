@@ -40,12 +40,13 @@ The canonical data directory is `~/.redrob/vectordb`. The app can rebuild all de
 2. `ignore::WalkBuilder` discovers supported files while respecting standard ignore rules, excluded directory names, size limits, and symlink boundaries.
 3. Format-specific readers extract text and optional page metadata.
 4. Text is normalized and split into overlapping passages.
-5. Passages are saved to SQLite and embedded locally in batches.
-6. Qdrant Edge receives the vectors and searchable payload identifiers.
-7. A recursive watcher schedules reconciliation after create, modify, and remove events.
-8. Existing libraries are reconciled at application startup to catch offline changes.
+5. Passages are committed to SQLite with vector state `pending` and embedded locally in batches.
+6. Previous vector IDs are removed and Qdrant Edge receives the replacement vectors.
+7. The SQLite record becomes `ready` only after every vector batch succeeds; interrupted records are reprocessed on startup.
+8. A recursive watcher schedules reconciliation after create, modify, and remove events.
+9. Existing libraries are reconciled at application startup to catch offline changes. Missing or unmounted roots are preserved rather than interpreted as file deletions.
 
-Per-file failures are recorded without aborting the rest of the library. Failed documents have stale FTS chunks removed.
+Per-file failures are recorded without aborting the rest of the library. Failed documents have stale FTS chunks removed. Extraction size and passage-count ceilings protect against pathological expansion.
 
 ## Retrieval
 
@@ -59,12 +60,23 @@ Ask first retrieves relevant passages locally unless explicit passage IDs are su
 
 Axum serves `/health`, `/v1/search`, and `/v1/ask` on `127.0.0.1`. Every endpoint requires `Authorization: Bearer <token>`. The token is randomly generated and written with mode `0600` on Unix. API enablement and port changes apply after restart.
 
+## Storage and recovery
+
+SQLite schema changes use monotonic `PRAGMA user_version` migrations. Startup performs SQLite quick and foreign-key checks, and each migration first creates a consistent `VACUUM INTO` backup. Manual backups use the same mechanism and the newest three are retained. Metadata backups contain extracted passages and paths and require the same protection as source documents.
+
+A failed Qdrant Edge load quarantines the derived shard and marks every indexed document for vector repair. A failed SQLite integrity check preserves the database under a timestamped quarantine filename before creating a clean library. Databases created by newer application versions are refused rather than downgraded. See `docs/RECOVERY.md`.
+
+## Signed updates
+
+Development builds do not configure an update endpoint. The release workflow injects the public verification key and stable GitHub Releases endpoint into signed production builds, creates updater artifacts, and uploads `latest.json`. The frontend checks only on explicit user action and installs only artifacts accepted by Tauri's signature verifier.
+
 ## Trust boundaries
 
 - Tauri IPC is available only to the bundled frontend under the configured CSP.
-- Source open/reveal commands verify that the path exists before invoking the operating system.
-- External Console links use the Tauri opener plugin.
-- The local API does not bind to a LAN interface.
+- Source open/reveal commands canonicalize paths and require membership in a selected library folder.
+- External Console links use the Tauri opener plugin; the unused shell plugin is not included.
+- The local API does not bind to a LAN interface, repairs Unix token permissions, creates tokens atomically, and permits at most two concurrent Ask requests.
+- Redrob errors are classified and upstream response bodies are never returned to the UI or local API.
 - No source text is written to logs intentionally, though parser errors in development may include local paths.
 
 ## Release constraints

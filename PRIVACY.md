@@ -12,7 +12,8 @@ The app stores the following under `~/.redrob/vectordb`:
 - text passages extracted from supported files;
 - keyword-search data and local vector embeddings;
 - the downloaded embedding model;
-- application settings; and
+- application settings;
+- up to three consistent metadata backups created manually or before migrations; and
 - a random token used to authenticate the loopback API.
 
 The Redrob workspace API key is stored in the operating system credential manager, not in the metadata database. Original files remain in their existing locations and are not copied into application storage.
@@ -36,6 +37,10 @@ The app does not include file paths, filenames, complete files, unrelated passag
 
 The request is sent to the configured Redrob API base URL, which defaults to `https://console.redrob.ai/api/backend/v1`. Processing by Redrob is governed by the terms and privacy commitments for your Redrob workspace.
 
+### Application updates
+
+Signed production builds contact the configured GitHub Releases endpoint when you select **Check for updates**. The request includes normal HTTP metadata and the app's current version, operating system, and CPU architecture through the updater URL contract. It does not include files, paths, excerpts, searches, API keys, or the local API token. Downloaded updates must pass Tauri signature verification before installation. Development builds do not configure an updater endpoint.
+
 ### Model download
 
 FastEmbed downloads the multilingual embedding model when it is needed for the first time. The model is then cached under the local application data directory. This download reveals normal network metadata such as your IP address to the model host, but does not include your files or extracted content.
@@ -50,7 +55,7 @@ The application does not include an analytics, advertising, crash-reporting, or 
 
 ## Delete local data
 
-- **Settings → Clear local index** removes searchable metadata, passages, and vectors but does not modify original files or watched-folder settings.
+- **Settings → Clear local index** removes searchable metadata, passages, and vectors but does not modify original files, watched-folder settings, or previously created backups.
 - **Disconnect Redrob** removes the stored API key from the operating system credential manager.
 - To remove all app data, quit Redrob VectorDB and delete `~/.redrob/vectordb`.
 

@@ -4,7 +4,7 @@ pub const EMBEDDING_DIMENSION: usize = 384;
 pub const VECTOR_NAME: &str = "semantic";
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[serde(default, rename_all = "camelCase")]
 pub struct AppSettings {
     pub library_paths: Vec<String>,
     pub excluded_paths: Vec<String>,
@@ -17,6 +17,56 @@ pub struct AppSettings {
     pub local_api_enabled: bool,
     pub local_api_port: u16,
     pub redrob_base_url: String,
+}
+
+impl AppSettings {
+    pub fn validate(&self) -> anyhow::Result<()> {
+        anyhow::ensure!(
+            (1..=250).contains(&self.max_file_size_mb),
+            "maximum file size must be between 1 MB and 250 MB"
+        );
+        anyhow::ensure!(
+            (256..=8_192).contains(&self.chunk_size),
+            "passage size must be between 256 and 8192 characters"
+        );
+        anyhow::ensure!(
+            self.chunk_overlap < self.chunk_size && self.chunk_overlap <= 2_048,
+            "passage overlap must be smaller than the passage size"
+        );
+        anyhow::ensure!(
+            !self.answer_model.trim().is_empty() && self.answer_model.len() <= 128,
+            "answer model is invalid"
+        );
+        anyhow::ensure!(
+            (1_024..=65_535).contains(&self.local_api_port),
+            "local API port must be between 1024 and 65535"
+        );
+        anyhow::ensure!(
+            (1..=32).contains(&self.include_extensions.len()),
+            "choose between 1 and 32 supported file types"
+        );
+        anyhow::ensure!(
+            self.include_extensions.iter().all(|extension| {
+                !extension.is_empty()
+                    && extension.len() <= 16
+                    && extension
+                        .chars()
+                        .all(|character| character.is_ascii_alphanumeric())
+            }),
+            "supported file types contain an invalid extension"
+        );
+        let endpoint = url::Url::parse(self.redrob_base_url.trim())
+            .map_err(|_| anyhow::anyhow!("Redrob API URL is invalid"))?;
+        let local_http = endpoint.scheme() == "http"
+            && endpoint
+                .host_str()
+                .is_some_and(|host| matches!(host, "localhost" | "127.0.0.1" | "::1"));
+        anyhow::ensure!(
+            endpoint.scheme() == "https" || local_http,
+            "Redrob API URL must use HTTPS (HTTP is allowed only for localhost)"
+        );
+        Ok(())
+    }
 }
 
 impl Default for AppSettings {
@@ -211,4 +261,32 @@ pub struct IndexProgress {
     pub current_file: Option<String>,
     pub status: IndexStatus,
     pub message: String,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::AppSettings;
+
+    #[test]
+    fn default_settings_are_valid() {
+        AppSettings::default().validate().unwrap();
+    }
+
+    #[test]
+    fn unsafe_remote_http_endpoint_is_rejected() {
+        let settings = AppSettings {
+            redrob_base_url: "http://example.com/v1".into(),
+            ..AppSettings::default()
+        };
+        assert!(settings.validate().is_err());
+    }
+
+    #[test]
+    fn localhost_http_endpoint_is_allowed_for_development() {
+        let settings = AppSettings {
+            redrob_base_url: "http://127.0.0.1:8080/v1".into(),
+            ..AppSettings::default()
+        };
+        settings.validate().unwrap();
+    }
 }

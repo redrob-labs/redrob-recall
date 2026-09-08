@@ -2,6 +2,23 @@
 
 All notable changes to Redrob VectorDB are documented here.
 
+## [Unreleased]
+
+### Added
+
+- Signed multi-platform GitHub release workflow with Tauri updater artifacts and draft-release QA gates.
+- Explicit update check and signed install flow in Settings.
+- Versioned SQLite migrations, integrity checks, pre-migration/manual backups, and recovery documentation.
+- Automated Rust tests, locked verification, RustSec auditing, and a cross-platform release checklist.
+
+### Changed
+
+- Ask failures now classify credentials, balance, rate limits, timeouts, service failures, and malformed responses without exposing upstream bodies.
+- Index records remain pending until semantic vectors commit, enabling interruption recovery.
+- Missing external library roots are preserved, settings are backend-validated, and extraction work is bounded.
+- Source opening is restricted to selected library roots and the unused Tauri shell capability was removed.
+- Local API token creation is atomic, Unix permissions are repaired, and concurrent Ask requests are limited.
+
 ## [0.1.0] - 2026-09-08
 
 ### Added

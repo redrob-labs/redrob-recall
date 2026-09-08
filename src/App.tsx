@@ -625,6 +625,7 @@ function AskView({
 }) {
   const [question, setQuestion] = useState("");
   const [answer, setAnswer] = useState<AskResponse | null>(null);
+  const [askError, setAskError] = useState<string | null>(null);
   const [asking, setAsking] = useState(false);
   const [showConnect, setShowConnect] = useState(false);
   const submit = async (event: FormEvent) => {
@@ -636,9 +637,10 @@ function AskView({
     }
     try {
       setAsking(true);
+      setAskError(null);
       setAnswer(await bridge.ask(question, []));
     } catch (error) {
-      notify(readError(error), "error");
+      setAskError(readError(error));
     } finally {
       setAsking(false);
     }
@@ -728,13 +730,19 @@ function AskView({
           </button>
         </div>
       </form>
+      {askError && (
+        <div className="ask-error" role="alert">
+          <CircleHelp size={17} />
+          <span>{askError}</span>
+          <button onClick={() => setAskError(null)} aria-label="Dismiss error">
+            <X size={15} />
+          </button>
+        </div>
+      )}
       {showConnect && (
         <ConnectModal
           close={() => setShowConnect(false)}
-          connected={() => {
-            setShowConnect(false);
-            notify("Redrob connected for this device.", "success");
-          }}
+          connected={() => setShowConnect(false)}
           notify={notify}
         />
       )}
@@ -990,7 +998,17 @@ function SettingsView({
   const [settings, setSettings] = useState(snapshot.settings);
   const [saving, setSaving] = useState(false);
   const [showConnect, setShowConnect] = useState(false);
+  const [maintenanceBusy, setMaintenanceBusy] = useState(false);
+  const [compactLayout, setCompactLayout] = useState(
+    () => window.matchMedia("(max-width: 1000px)").matches,
+  );
   useEffect(() => setSettings(snapshot.settings), [snapshot.settings]);
+  useEffect(() => {
+    const media = window.matchMedia("(max-width: 1000px)");
+    const update = () => setCompactLayout(media.matches);
+    media.addEventListener("change", update);
+    return () => media.removeEventListener("change", update);
+  }, []);
   const save = async (next: AppSettings) => {
     try {
       setSaving(true);
@@ -1024,9 +1042,53 @@ function SettingsView({
     try {
       await bridge.disconnect();
       await refresh();
+      document.querySelector<HTMLElement>(".workspace")?.scrollTo({ top: 0 });
       notify("Redrob disconnected from this device.", "success");
     } catch (error) {
       notify(readError(error), "error");
+    }
+  };
+  const createBackup = async () => {
+    try {
+      setMaintenanceBusy(true);
+      const path = await bridge.createBackup();
+      notify(`Local backup created: ${lastPathPart(path)}`, "success");
+    } catch (error) {
+      notify(readError(error), "error");
+    } finally {
+      setMaintenanceBusy(false);
+    }
+  };
+  const checkHealth = async () => {
+    try {
+      setMaintenanceBusy(true);
+      notify(await bridge.checkLibraryHealth(), "success");
+    } catch (error) {
+      notify(readError(error), "error");
+    } finally {
+      setMaintenanceBusy(false);
+    }
+  };
+  const checkForUpdates = async () => {
+    try {
+      setMaintenanceBusy(true);
+      const update = await bridge.checkForUpdate();
+      if (!update) {
+        notify("Redrob VectorDB is up to date.", "success");
+        return;
+      }
+      if (
+        window.confirm(
+          `Redrob VectorDB ${update.version} is available. Download, install, and restart now?`,
+        )
+      ) {
+        notify(`Downloading Redrob VectorDB ${update.version}…`, "info");
+        await bridge.installPendingUpdate();
+      }
+    } catch (error) {
+      notify(readError(error), "error");
+    } finally {
+      setMaintenanceBusy(false);
     }
   };
   return (
@@ -1036,6 +1098,18 @@ function SettingsView({
           <span className="eyebrow">PREFERENCES</span>
           <h1>Settings</h1>
         </div>
+        {compactLayout && (
+          <button
+            className="secondary compact-connection-action"
+            onClick={() =>
+              snapshot.connection.connected
+                ? void disconnect()
+                : setShowConnect(true)
+            }
+          >
+            {snapshot.connection.connected ? "Disconnect" : "Connect Redrob"}
+          </button>
+        )}
         {saving && (
           <span className="saving">
             <LoaderCircle className="spin" size={15} /> Saving
@@ -1070,19 +1144,23 @@ function SettingsView({
               </strong>
               <span>
                 {snapshot.connection.connected
-                  ? "This device can ask questions using your workspace credit."
+                  ? "The key is verified by Redrob when you send your first question."
                   : "Local indexing and search work without an account."}
               </span>
             </div>
-            {snapshot.connection.connected ? (
-              <button className="secondary" onClick={() => void disconnect()}>
-                Disconnect
-              </button>
-            ) : (
-              <button className="primary" onClick={() => setShowConnect(true)}>
-                Connect Redrob
-              </button>
-            )}
+            {!compactLayout &&
+              (snapshot.connection.connected ? (
+                <button className="secondary" onClick={() => void disconnect()}>
+                  Disconnect
+                </button>
+              ) : (
+                <button
+                  className="primary"
+                  onClick={() => setShowConnect(true)}
+                >
+                  Connect Redrob
+                </button>
+              ))}
           </div>
         </SettingsSection>
         <SettingsSection
@@ -1179,16 +1257,53 @@ function SettingsView({
           description="The index can be rebuilt from your original files at any time."
         >
           <div className="storage-summary">
-            <div>
-              <strong>{formatBytes(snapshot.stats.totalBytes)}</strong>
-              <span>source files represented</span>
+            <div className="storage-facts">
+              <div>
+                <strong>{formatBytes(snapshot.stats.totalBytes)}</strong>
+                <span>source files represented</span>
+              </div>
+              <div>
+                <strong>{snapshot.dataDirectory}</strong>
+                <span>local data directory</span>
+              </div>
             </div>
-            <div>
-              <strong>{snapshot.dataDirectory}</strong>
-              <span>local data directory</span>
+            <div className="storage-actions">
+              <button
+                className="secondary"
+                disabled={maintenanceBusy}
+                onClick={() => void checkHealth()}
+              >
+                <ShieldCheck size={16} /> Check health
+              </button>
+              <button
+                className="secondary"
+                disabled={maintenanceBusy}
+                onClick={() => void createBackup()}
+              >
+                <Archive size={16} /> Create backup
+              </button>
+              <button className="danger-button" onClick={() => void clear()}>
+                <Trash2 size={16} /> Clear local index
+              </button>
             </div>
-            <button className="danger-button" onClick={() => void clear()}>
-              <Trash2 size={16} /> Clear local index
+          </div>
+        </SettingsSection>
+        <SettingsSection
+          icon={<RefreshCw />}
+          title="Updates"
+          description="Updates are verified with Redrob's release signature before installation."
+        >
+          <div className="setting-row">
+            <div>
+              <strong>Redrob VectorDB {snapshot.appVersion}</strong>
+              <span>Check the signed stable release channel.</span>
+            </div>
+            <button
+              className="secondary"
+              disabled={maintenanceBusy}
+              onClick={() => void checkForUpdates()}
+            >
+              <RefreshCw size={16} /> Check for updates
             </button>
           </div>
         </SettingsSection>
@@ -1263,7 +1378,7 @@ function ConnectModal({
       setSubmitting(true);
       await bridge.connect(apiKey);
       connected();
-      notify("Redrob connected.", "success");
+      notify("Redrob key saved to this device.", "success");
     } catch (error) {
       notify(readError(error), "error");
     } finally {
@@ -1551,9 +1666,15 @@ const statusLabel = (status: string) =>
     paused: "Indexing paused",
     error: "Needs attention",
   })[status] ?? "Library ready";
-const readError = (error: unknown) =>
-  error instanceof Error
-    ? error.message
-    : typeof error === "string"
-      ? error
-      : "Something unexpected happened.";
+const readError = (error: unknown) => {
+  if (error instanceof Error) return error.message;
+  if (typeof error === "string") return error;
+  if (
+    error &&
+    typeof error === "object" &&
+    "message" in error &&
+    typeof error.message === "string"
+  )
+    return error.message;
+  return "Something unexpected happened.";
+};
