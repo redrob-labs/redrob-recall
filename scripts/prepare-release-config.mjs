@@ -4,12 +4,7 @@ import { resolve } from "node:path";
 const publicKey = process.env.TAURI_UPDATER_PUBLIC_KEY?.trim();
 if (!publicKey)
   throw new Error("TAURI_UPDATER_PUBLIC_KEY is required for a release build.");
-const endpoint = process.env.REDROB_UPDATER_ENDPOINT?.trim();
-if (!endpoint)
-  throw new Error("REDROB_UPDATER_ENDPOINT is required for a release build.");
-const parsedEndpoint = new URL(endpoint);
-if (parsedEndpoint.protocol !== "https:")
-  throw new Error("REDROB_UPDATER_ENDPOINT must use HTTPS.");
+const endpoint = "https://cdn.redrob.ai/vectordb/latest.json";
 
 const config = {
   bundle: {
@@ -25,10 +20,10 @@ const config = {
 };
 
 if (process.platform === "win32") {
-  const thumbprint = process.env.WINDOWS_CERTIFICATE_THUMBPRINT?.trim();
+  const thumbprint = process.env.WIN_CSC_CERTIFICATE_THUMBPRINT?.trim();
   if (!thumbprint) {
     throw new Error(
-      "WINDOWS_CERTIFICATE_THUMBPRINT is required for a Windows release.",
+      "WIN_CSC_CERTIFICATE_THUMBPRINT is required for a Windows release.",
     );
   }
   config.bundle.windows = {
