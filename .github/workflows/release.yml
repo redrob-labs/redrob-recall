@@ -68,6 +68,7 @@ jobs:
           RUSTUP_TOOLCHAIN: stable
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
+          working-directory: src-tauri
 
   build:
     name: Build ${{ matrix.label }}
