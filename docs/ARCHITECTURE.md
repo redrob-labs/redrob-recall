@@ -68,7 +68,11 @@ A failed Qdrant Edge load quarantines the derived shard and marks every indexed 
 
 ## Signed updates
 
-Development builds do not configure an update endpoint. The release workflow injects the public verification key and stable GitHub Releases endpoint into signed production builds, creates updater artifacts, and uploads `latest.json`. The frontend checks only on explicit user action and installs only artifacts accepted by Tauri's signature verifier.
+Development builds do not configure an update endpoint. Production builds embed the updater public verification key and the fixed stable endpoint `https://cdn.redrob.ai/vectordb/latest.json`. A numeric release tag builds signed updater artifacts into a draft GitHub Release, where the exact files remain private from the stable channel during QA.
+
+Publishing an approved non-prerelease GitHub Release starts a separate protected promotion job. It requires a successful tag workflow for the exact `main`-reachable tag commit, downloads the release's snapshotted assets by asset ID, and verifies GitHub SHA-256 digests before reading the current stable manifest directly from the CDN origin. It copies non-manifest assets byte-for-byte to immutable `vectordb/v<version>/` CDN keys. It rewrites only the platform URLs in the signed Tauri metadata, downloads and hashes every referenced public URL, and conditionally uploads `vectordb/latest.json` last against the origin state it validated. Versioned assets use a one-year immutable public cache policy; stable metadata uses `no-store, max-age=0`. Existing versioned keys may be reused only when their origin bytes, SHA-256 metadata, size, content type, and cache policy match, and stable versions can move only forward.
+
+The CDN is a distribution boundary, not a signing authority. It never receives the updater private key. The frontend checks for updates only on explicit user action, and Tauri accepts an artifact only when its signature verifies against the public key embedded in the installed application.
 
 ## Trust boundaries
 
@@ -81,4 +85,6 @@ Development builds do not configure an update endpoint. The release workflow inj
 
 ## Release constraints
 
-Qdrant Edge 0.8.0 currently requires the narrowly scoped Rust compiler workaround documented in `.cargo/config.toml`. Cross-platform installer builds require the Tauri native prerequisites and platform signing/notarization credentials. These credentials must never be stored in the repository.
+Qdrant Edge 0.8.0 currently requires the narrowly scoped Rust compiler workaround documented in `.cargo/config.toml`. Cross-platform installer builds require the Tauri native prerequisites and platform signing/notarization credentials. Apple Developer ID certificate/notarization secrets, `WIN_CSC_LINK`, `WIN_CSC_KEY_PASSWORD`, updater signing keys, and CDN credentials must never be stored in the repository.
+
+A bad stable release is corrected with a newer signed patch release; immutable CDN assets are not replaced and clients are not rolled back to an older version. Updater key rotation still requires a transition release trusted by the existing embedded key.
