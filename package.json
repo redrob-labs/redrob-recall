@@ -1,0 +1,39 @@
+{
+  "name": "redrob-vectordb",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Search and ask across everything on your computer.",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/savagemanage/openVectorDB.git"
+  },
+  "homepage": "https://github.com/savagemanage/openVectorDB#readme",
+  "bugs": "https://github.com/savagemanage/openVectorDB/issues",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc && vite build",
+    "preview": "vite preview",
+    "tauri": "tauri",
+    "check": "tsc --noEmit && cargo check --manifest-path src-tauri/Cargo.toml",
+    "lint:rust": "cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings",
+    "verify": "npm run build && npm audit --audit-level=high && cargo fmt --manifest-path src-tauri/Cargo.toml -- --check && npm run lint:rust",
+    "format": "prettier --write \"src/**/*.{ts,tsx,css}\" \"*.{json,ts,html,md}\" && cargo fmt --manifest-path src-tauri/Cargo.toml"
+  },
+  "dependencies": {
+    "@tauri-apps/api": "2.11.1",
+    "@tauri-apps/plugin-opener": "2.5.5",
+    "lucide-react": "0.468.0",
+    "react": "19.2.0",
+    "react-dom": "19.2.0"
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": "2.11.4",
+    "@types/react": "19.2.2",
+    "@types/react-dom": "19.2.2",
+    "@vitejs/plugin-react": "5.0.4",
+    "prettier": "3.6.2",
+    "typescript": "5.9.3",
+    "vite": "7.3.6"
+  }
+}

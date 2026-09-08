@@ -1,0 +1,61 @@
+[package]
+name = "redrob-vectordb"
+version = "0.1.0"
+description = "Private, local-first semantic search for everything on your computer"
+authors = ["Redrob"]
+edition = "2021"
+rust-version = "1.95"
+license = "LicenseRef-Proprietary"
+repository = "https://github.com/savagemanage/openVectorDB"
+homepage = "https://github.com/savagemanage/openVectorDB"
+readme = "../README.md"
+
+[lib]
+name = "redrob_vectordb_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2.5.2", features = [] }
+
+[dependencies]
+anyhow = "1.0.100"
+axum = "0.8.7"
+chrono = { version = "0.4.42", features = ["serde"] }
+directories = "6.0.0"
+fastembed = { version = "6.0.3", default-features = false, features = ["ort-download-binaries-rustls-tls", "hf-hub-rustls-tls"] }
+futures-util = "0.3.31"
+ignore = "0.4.25"
+keyring = { version = "3.6.3", features = ["apple-native", "windows-native", "sync-secret-service"] }
+mime_guess = "2.0.5"
+notify = "8.2.0"
+once_cell = "1.21.3"
+parking_lot = "0.12.5"
+pdf-extract = "0.10.0"
+qdrant-edge = "=0.8.0"
+quick-xml = "0.38.4"
+reqwest = { version = "0.12.24", default-features = false, features = ["json", "rustls-tls", "stream"] }
+rusqlite = { version = "0.37.0", features = ["bundled", "chrono"] }
+serde = { version = "1.0.228", features = ["derive"] }
+serde_json = "1.0.145"
+sha2 = "0.10.9"
+tauri = { version = "2.11.5", features = ["tray-icon"] }
+tauri-plugin-dialog = "2.7.3"
+tauri-plugin-opener = "2.5.3"
+tauri-plugin-shell = "2.3.6"
+tauri-plugin-single-instance = "2.4.4"
+thiserror = "2.0.17"
+tokio = { version = "1.48.0", features = ["macros", "rt-multi-thread", "sync", "time", "net"] }
+tower-http = { version = "0.6.6", features = ["cors", "trace"] }
+tracing = "0.1.41"
+tracing-subscriber = { version = "0.3.20", features = ["env-filter"] }
+url = "2.5.7"
+uuid = { version = "1.18.1", features = ["v4", "serde"] }
+walkdir = "2.5.0"
+zip = { version = "6.0.0", default-features = false, features = ["deflate"] }
+
+[profile.release]
+codegen-units = 1
+lto = "thin"
+opt-level = "s"
+panic = "abort"
+strip = true

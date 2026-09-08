@@ -1,0 +1,8 @@
+# qdrant-edge 0.8 uses std::debug_assert_matches while that macro is still
+# feature-gated on Rust 1.95. This enables that single crate attribute until
+# the next upstream release removes the unstable macro.
+[env]
+RUSTC_BOOTSTRAP = { value = "1", force = true }
+
+[target.'cfg(any(target_os = "windows", target_os = "macos", target_os = "linux"))']
+rustflags = ["-Zcrate-attr=feature(assert_matches)"]

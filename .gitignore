@@ -1,0 +1,30 @@
+# Dependencies and builds
+node_modules/
+dist/
+src-tauri/target/
+
+# Local application data
+.redrob-vectordb/
+*.db
+*.db-shm
+*.db-wal
+
+# Sandbox-only native package shims
+.pkgconfig/
+
+# Tooling and plans
+.tasks/
+.agents/tasks/
+
+# Environment and editor files
+.env
+.env.*
+!.env.example
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+
+# Logs
+*.log
+npm-debug.log*
