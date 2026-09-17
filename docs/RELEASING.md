@@ -48,9 +48,9 @@ trusted non-revoked chain. After packaging, CI verifies every NSIS/MSI Authentic
 signature, signer thumbprint, and timestamp before the tag workflow can succeed. Apple
 Developer ID signing and notarization remain required for both macOS architectures.
 
-No CDN credential is involved any more. `REDROB_CDN_ACCESS_KEY_ID`,
-`REDROB_CDN_SECRET_ACCESS_KEY`, and `REDROB_CDN_BUCKET` still exist at the organization
-level for other products; this repository does not read them.
+No CDN credential is involved. The CDN promotion step was removed along with the CDN
+itself; the release consumes only the signing material above plus the run's own
+`GITHUB_TOKEN`.
 
 The workflow verifies that release commits are reachable from `origin/main`, requires
 `npm run verify` and the pinned RustSec audit to pass, serializes matrix builds to prevent
