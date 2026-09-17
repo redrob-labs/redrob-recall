@@ -52,6 +52,18 @@ push. The second number is just unreleased work and carries no warning.
 Merges are squash-only and the branch is deleted on merge, so one pull request becomes one commit
 on `develop`.
 
+Those branch names are now machine-checked rather than trusted. `.github/workflows/gitflow.yml`
+fails a pull request whose head branch is not `<type>/<slug>` with a type drawn from `feat`, `fix`,
+`chore`, `docs`, `test`, `refactor`, `perf`, `release`, `hotfix`, which is exactly the set
+`CONTRIBUTING.md` declares, and it exempts `develop` and `main` because a promotion or back-merge
+branch is not named after a type. It exists because a rule nothing checks is only a preference:
+branches have already appeared in this repository under a `kiro/` prefix that no document defines,
+and a branch name is supposed to say what the change is, not which tool produced it. The same file
+carries a second job, on `push` to `main` rather than on a pull request, that fails when `main`
+holds commits `develop` does not. That is the back-merge gap described above, and it is the one
+failure the two commands above cannot warn you about on their own, because both branches stay green
+while they drift.
+
 ## Branch protection, as configured
 
 Both `develop` and `main` are protected identically:
@@ -60,9 +72,13 @@ Both `develop` and `main` are protected identically:
 - force pushes blocked, branch deletion blocked;
 - 0 required approving reviews;
 - administrator enforcement off;
-- one required status check: `Verify source and desktop core`.
+- required status checks: `Verify source and desktop core` and `Rust security advisories`.
 
-Nothing else blocks a merge. That matters for the second check below.
+That last line has to be read from two places or you will get it wrong. The classic branch
+protection API reports only `Verify source and desktop core`, but the repository ruleset named
+`trunk protection` is `active` over `refs/heads/main` and `refs/heads/develop` with no bypass
+actors, and it requires both checks. A merge must satisfy the union of the two mechanisms, so both
+of them gate.
 
 ## What CI actually runs
 
@@ -77,11 +93,12 @@ Two workflow files, and only one of them ever sees a pull request.
 - **`Rust security advisories`** on `ubuntu-24.04`, on Rust `stable` rather than the pinned
   toolchain, installs `cargo-audit` 0.22.2 and runs `cargo audit --file src-tauri/Cargo.lock`.
 
-The advisories job **does run on every pull request**, and it is **not** a required status check,
-so it reports and does not gate the merge. A dependency bump can therefore merge with that job
-red, and the merge button will not stop you. Read the job before you merge a lockfile change.
-The advisory database changes daily, so this job can also turn red on a branch that touched no
-dependency at all; compare the same job on `develop` before treating a finding as yours.
+The advisories job runs **on every pull request** and on no schedule at all, and the `trunk
+protection` ruleset **does** require it, so a red advisory blocks the merge rather than merely
+reporting it. Do not read the single-check answer from the branch protection API and conclude a
+lockfile change can merge red. The advisory database changes daily, so this job can turn red on a
+branch that touched no dependency at all; compare the same job on `develop` before treating a
+finding as yours, and when it is real, bump the crate rather than allowing the advisory.
 
 `.github/workflows/release.yml` is named `Signed desktop release` and triggers **only** on
 `push` of tags matching `v*.*.*`. It never runs on a pull request, so nothing you do in a pull
