@@ -36,7 +36,7 @@ impl Storage {
             connection.pragma_query_value(None, "user_version", |row| row.get(0))?;
         anyhow::ensure!(
             current_version <= SCHEMA_VERSION,
-            "this library was created by a newer version of Redrob VectorDB"
+            "this library was created by a newer version of Redrob Recall"
         );
         if had_database && current_version < SCHEMA_VERSION {
             create_backup_with_connection(&connection, path, "pre-migration")?;
@@ -564,7 +564,7 @@ mod tests {
 
     fn temporary_database(name: &str) -> std::path::PathBuf {
         let directory = std::env::temp_dir().join(format!(
-            "redrob-vectordb-{name}-{}",
+            "redrob-recall-{name}-{}",
             uuid::Uuid::new_v4().simple()
         ));
         std::fs::create_dir_all(&directory).unwrap();

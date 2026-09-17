@@ -5,7 +5,7 @@ to be green before a merge, and the promise the product makes that a change must
 
 ## The promise
 
-Redrob VectorDB is **local-first**. Files, extracted text, embeddings and the whole search index stay
+Redrob Recall is **local-first**. Files, extracted text, embeddings and the whole search index stay
 on the device. Search is local and free. When a user asks a question, only that question and the few
 relevant excerpts leave the machine; filenames, paths, whole files and the index do not.
 

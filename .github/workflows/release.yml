@@ -258,7 +258,7 @@ jobs:
           APPLE_API_KEY_PATH: ${{ env.APPLE_API_KEY_PATH }}
         with:
           tagName: v__VERSION__
-          releaseName: Redrob VectorDB v__VERSION__
+          releaseName: Redrob Recall v__VERSION__
           releaseBody: See CHANGELOG.md for release notes. Installers and updater bundles are signed; the release remains a draft until platform smoke tests are approved.
           releaseDraft: true
           prerelease: false
@@ -297,7 +297,7 @@ jobs:
       contents: read
     environment: production-release
     concurrency:
-      group: vectordb-cdn-stable
+      group: recall-cdn-stable
       cancel-in-progress: false
     runs-on: ubuntu-24.04
     timeout-minutes: 30
@@ -440,7 +440,7 @@ jobs:
           origin_error="$RUNNER_TEMP/origin-latest-error"
           if origin_metadata="$(aws s3api get-object \
             --bucket "$REDROB_CDN_BUCKET" \
-            --key "vectordb/latest.json" \
+            --key "recall/latest.json" \
             "$origin_manifest" 2>"$origin_error")"; then
             origin_etag="$(jq -er '.ETag' <<< "$origin_metadata")"
             jq -n --arg mode "if-match" --arg etag "$origin_etag" \
@@ -474,11 +474,11 @@ jobs:
             exit 1
           fi
           candidate_version="$(jq -er '.candidateVersion' "$CDN_PLAN_PATH")"
-          expected_prefix="vectordb/v$candidate_version"
+          expected_prefix="recall/v$candidate_version"
           if ! jq -e \
             --arg prefix "$expected_prefix" \
             --arg assets "$RELEASE_ASSETS_DIR/" \
-            '.versionPrefix == $prefix and .manifestKey == "vectordb/latest.json" and
+            '.versionPrefix == $prefix and .manifestKey == "recall/latest.json" and
              all(.assets[]; (.key | startswith($prefix + "/")) and (.localPath | startswith($assets)))' \
             "$CDN_PLAN_PATH" > /dev/null; then
             echo "::error::CDN plan escaped the approved version or release-asset paths"
@@ -631,7 +631,7 @@ jobs:
           for attempt in $(seq 1 24); do
             if curl --fail --silent --show-error --location \
               --output "$public_manifest" \
-              "https://cdn.redrob.ai/vectordb/latest.json?promotion-verify=$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT-$attempt" &&
+              "https://cdn.redrob.ai/recall/latest.json?promotion-verify=$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT-$attempt" &&
                jq -S -c . "$public_manifest" > "$public_normalized" &&
                cmp --silent "$local_normalized" "$public_normalized"; then
               verified=true

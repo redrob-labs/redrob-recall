@@ -1,6 +1,6 @@
 # Changelog
 
-All notable changes to Redrob VectorDB are documented here.
+All notable changes to Redrob Recall are documented here.
 
 ## [Unreleased]
 

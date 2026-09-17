@@ -4,7 +4,7 @@ import { resolve } from "node:path";
 const publicKey = process.env.TAURI_UPDATER_PUBLIC_KEY?.trim();
 if (!publicKey)
   throw new Error("TAURI_UPDATER_PUBLIC_KEY is required for a release build.");
-const endpoint = "https://cdn.redrob.ai/vectordb/latest.json";
+const endpoint = "https://cdn.redrob.ai/recall/latest.json";
 
 const config = {
   bundle: {

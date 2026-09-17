@@ -162,7 +162,7 @@ function Sidebar({
     <aside className="sidebar">
       <div className="wordmark">
         <Logo />
-        <span>VectorDB</span>
+        <span>Recall</span>
       </div>
       <nav className="nav-list" aria-label="Main navigation">
         {nav.map((item) => {
@@ -237,7 +237,7 @@ function Onboarding({
       <header className="onboarding-header">
         <div className="wordmark">
           <Logo />
-          <span>VectorDB</span>
+          <span>Recall</span>
         </div>
         <span className="local-badge">
           <LockKeyhole size={14} /> Private by default
@@ -299,7 +299,7 @@ function Onboarding({
           <div className="local-core">
             <Database size={25} />
             <span>Local index</span>
-            <small>~/.redrob/vectordb</small>
+            <small>~/.redrob/recall</small>
           </div>
         </section>
       </div>
@@ -307,7 +307,7 @@ function Onboarding({
         <span>
           <HardDrive size={15} /> Stored at {snapshot.dataDirectory}
         </span>
-        <span>Redrob VectorDB {snapshot.appVersion}</span>
+        <span>Redrob Recall {snapshot.appVersion}</span>
       </footer>
     </div>
   );
@@ -1074,15 +1074,15 @@ function SettingsView({
       setMaintenanceBusy(true);
       const update = await bridge.checkForUpdate();
       if (!update) {
-        notify("Redrob VectorDB is up to date.", "success");
+        notify("Redrob Recall is up to date.", "success");
         return;
       }
       if (
         window.confirm(
-          `Redrob VectorDB ${update.version} is available. Download, install, and restart now?`,
+          `Redrob Recall ${update.version} is available. Download, install, and restart now?`,
         )
       ) {
-        notify(`Downloading Redrob VectorDB ${update.version}…`, "info");
+        notify(`Downloading Redrob Recall ${update.version}…`, "info");
         await bridge.installPendingUpdate();
       }
     } catch (error) {
@@ -1295,7 +1295,7 @@ function SettingsView({
         >
           <div className="setting-row">
             <div>
-              <strong>Redrob VectorDB {snapshot.appVersion}</strong>
+              <strong>Redrob Recall {snapshot.appVersion}</strong>
               <span>Check the signed stable release channel.</span>
             </div>
             <button
@@ -1308,7 +1308,7 @@ function SettingsView({
           </div>
         </SettingsSection>
         <div className="about-line">
-          <span>Redrob VectorDB {snapshot.appVersion}</span>
+          <span>Redrob Recall {snapshot.appVersion}</span>
           <span>Qdrant Edge · FastEmbed · Tauri</span>
           <span>© 2026 Redrob</span>
         </div>
@@ -1594,7 +1594,7 @@ function BootState() {
   return (
     <main className="boot-screen">
       <Logo />
-      <h1>Redrob VectorDB</h1>
+      <h1>Redrob Recall</h1>
       <p>
         <LoaderCircle className="spin" size={16} /> Opening your local library…
       </p>

@@ -16,7 +16,7 @@ pub fn run() {
     tracing_subscriber::fmt()
         .with_env_filter(
             tracing_subscriber::EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| "redrob_vectordb=info".into()),
+                .unwrap_or_else(|_| "redrob_recall=info".into()),
         )
         .compact()
         .init();
@@ -61,7 +61,7 @@ pub fn run() {
             commands::clear_library,
         ])
         .build(tauri::generate_context!())
-        .expect("failed to build Redrob VectorDB");
+        .expect("failed to build Redrob Recall");
 
     app.run(|app_handle, event| {
         if matches!(event, RunEvent::Exit | RunEvent::ExitRequested { .. }) {

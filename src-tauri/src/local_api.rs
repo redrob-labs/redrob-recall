@@ -60,7 +60,7 @@ async fn health(State(context): State<ApiContext>, headers: HeaderMap) -> impl I
             StatusCode::OK,
             Json(serde_json::json!({
                 "status": "ok",
-                "product": "Redrob VectorDB",
+                "product": "Redrob Recall",
                 "version": snapshot.app_version,
                 "documents": snapshot.stats.documents,
                 "chunks": snapshot.stats.indexed_chunks,

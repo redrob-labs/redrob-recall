@@ -1,17 +1,17 @@
 [package]
-name = "redrob-vectordb"
+name = "redrob-recall"
 version = "0.1.0"
 description = "Private, local-first semantic search for everything on your computer"
 authors = ["Redrob"]
 edition = "2021"
 rust-version = "1.95"
 license = "Apache-2.0"
-repository = "https://github.com/redrob-labs/redrob-vectordb"
-homepage = "https://github.com/redrob-labs/redrob-vectordb"
+repository = "https://github.com/redrob-labs/redrob-recall"
+homepage = "https://github.com/redrob-labs/redrob-recall"
 readme = "../README.md"
 
 [lib]
-name = "redrob_vectordb_lib"
+name = "redrob_recall_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
 
 [build-dependencies]

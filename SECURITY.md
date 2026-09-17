@@ -2,7 +2,7 @@
 
 ## Supported versions
 
-Redrob VectorDB is pre-1.0. Security fixes are applied to the latest version on the `main` branch; there is no backport branch for earlier tags.
+Redrob Recall is pre-1.0. Security fixes are applied to the latest version on the `main` branch; there is no backport branch for earlier tags.
 
 ## Reporting a vulnerability
 
@@ -20,10 +20,10 @@ Include:
 
 - The desktop process can read only folders the user selects, plus its application data directory.
 - Original files are not copied into application storage.
-- Extracted passages, SQLite metadata, embeddings, and Qdrant Edge data remain under `~/.redrob/vectordb`.
+- Extracted passages, SQLite metadata, embeddings, and Qdrant Edge data remain under `~/.redrob/recall`.
 - The Redrob key is stored in the OS credential manager.
 - Ask sends the question and selected excerpt text only. Filenames, paths, full files, and vectors are excluded.
-- The local API listens on loopback, authenticates every endpoint with the token at `~/.redrob/vectordb/local-api-token`, and limits concurrent credit-consuming Ask requests.
+- The local API listens on loopback, authenticates every endpoint with the token at `~/.redrob/recall/local-api-token`, and limits concurrent credit-consuming Ask requests.
 - Settings are validated in Rust; remote HTTP endpoints are rejected except loopback development endpoints.
 - File open/reveal commands accept only canonical files under selected library roots.
 - Production updates and installers are signed; updater verification cannot be disabled.

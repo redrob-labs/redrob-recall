@@ -62,13 +62,13 @@ Complete this checklist against the exact signed draft-release artifacts. The Gi
 - [ ] A modified artifact and invalid signature are rejected.
 - [ ] No update is offered for the same or an older version.
 - [ ] Backup/migration behavior is verified across the update.
-- [ ] `https://cdn.redrob.ai/vectordb/latest.json` remains unchanged while the GitHub Release and its assets are drafts.
+- [ ] `https://cdn.redrob.ai/recall/latest.json` remains unchanged while the GitHub Release and its assets are drafts.
 - [ ] The approved release is a non-prerelease numeric `vMAJOR.MINOR.PATCH` tag whose commit is reachable from `origin/main`.
 - [ ] Publishing the GitHub Release starts the protected `publish-cdn` job; no draft asset is promoted before that event.
 - [ ] Promotion rejects a missing/unsupported platform, wrong platform bundle type, signature, payload, GitHub digest, duplicate/unsafe asset, size mismatch, or candidate version that is not newer than stable.
 - [ ] Promotion requires a successful tag-triggered release workflow for the exact published tag commit and downloads the snapshotted release assets by asset ID.
 - [ ] Stable metadata contains `linux-x86_64`, `darwin-aarch64`, `darwin-x86_64`, and `windows-x86_64`; Windows selects the signed NSIS updater payload.
-- [ ] Every platform URL begins with `https://cdn.redrob.ai/vectordb/v<version>/`, is anonymously reachable with GET, and returns the exact approved size and SHA-256 bytes.
+- [ ] Every platform URL begins with `https://cdn.redrob.ai/recall/v<version>/`, is anonymously reachable with GET, and returns the exact approved size and SHA-256 bytes.
 - [ ] Versioned assets report `public, max-age=31536000, immutable`; `latest.json` reports `application/json` and `no-store, max-age=0`.
 - [ ] Existing versioned objects cannot be replaced with different content, and an interrupted asset upload leaves the previous stable `latest.json` intact.
 - [ ] A concurrent, stale, or externally racing publication fails its origin precondition and cannot move stable to the same or an older version.

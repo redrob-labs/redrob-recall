@@ -1,14 +1,14 @@
 {
-  "name": "redrob-vectordb",
+  "name": "redrob-recall",
   "version": "0.1.0",
   "private": true,
   "description": "Search and ask across everything on your computer.",
   "repository": {
     "type": "git",
-    "url": "https://github.com/redrob-labs/redrob-vectordb.git"
+    "url": "https://github.com/redrob-labs/redrob-recall.git"
   },
-  "homepage": "https://github.com/redrob-labs/redrob-vectordb#readme",
-  "bugs": "https://github.com/redrob-labs/redrob-vectordb/issues",
+  "homepage": "https://github.com/redrob-labs/redrob-recall#readme",
+  "bugs": "https://github.com/redrob-labs/redrob-recall/issues",
   "type": "module",
   "scripts": {
     "dev": "vite",

@@ -11,7 +11,7 @@ import {
 } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 
-const CDN_BASE = "https://cdn.redrob.ai/vectordb";
+const CDN_BASE = "https://cdn.redrob.ai/recall";
 const PLATFORM_ASSET_SUFFIXES = {
   "linux-x86_64": ".AppImage.tar.gz",
   "darwin-aarch64": ".app.tar.gz",
@@ -393,7 +393,7 @@ const manifestContents = prettyJson(manifest);
 const manifestSha256 = createHash("sha256")
   .update(manifestContents)
   .digest("hex");
-const versionPrefix = `vectordb/v${candidateVersion}`;
+const versionPrefix = `recall/v${candidateVersion}`;
 const planAssets = [];
 for (const asset of [...assetsByName.values()].sort((left, right) => {
   if (left.name < right.name) return -1;
@@ -416,7 +416,7 @@ for (const asset of [...assetsByName.values()].sort((left, right) => {
 const plan = {
   candidateVersion,
   versionPrefix,
-  manifestKey: "vectordb/latest.json",
+  manifestKey: "recall/latest.json",
   manifestSha256,
   assets: planAssets,
 };

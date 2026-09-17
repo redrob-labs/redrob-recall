@@ -5360,7 +5360,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "redrob-vectordb"
+name = "redrob-recall"
 version = "0.1.0"
 dependencies = [
  "anyhow",

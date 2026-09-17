@@ -1,6 +1,6 @@
-# Redrob VectorDB
+# Redrob Recall
 
-Redrob VectorDB is a local-first desktop app for searching folders and asking grounded questions about your files. Files, extracted text, embeddings, and the complete search index stay on the device. Search is free and local. When you use **Ask**, only your question and the few relevant text excerpts are sent to the existing Redrob API; filenames, paths, complete files, and the full index are not sent.
+Redrob Recall is a local-first desktop app for searching folders and asking grounded questions about your files. Files, extracted text, embeddings, and the complete search index stay on the device. Search is free and local. When you use **Ask**, only your question and the few relevant text excerpts are sent to the existing Redrob API; filenames, paths, complete files, and the full index are not sent.
 
 **Everything on your computer, searchable.**
 
@@ -26,18 +26,18 @@ Redrob VectorDB is a local-first desktop app for searching folders and asking gr
 | File watching               | `notify`                                                   |
 | Redrob answers              | `POST /chat/completions` on the configured Redrob base URL |
 
-Application data is stored in `~/.redrob/vectordb`:
+Application data is stored in `~/.redrob/recall`:
 
 - `metadata.db`: document metadata, extracted passages, and FTS data
 - `qdrant-edge/`: local semantic index
 - `models/`: downloaded local embedding model
 - `local-api-token`: generated local API bearer token (`0600` on Unix)
 
-Original files are never copied into this directory. Consistent metadata backups are retained under `~/.redrob/vectordb/backups`; see [Backup and recovery](docs/RECOVERY.md).
+Original files are never copied into this directory. Consistent metadata backups are retained under `~/.redrob/recall/backups`; see [Backup and recovery](docs/RECOVERY.md).
 
 ## Reliability and recovery
 
-Redrob VectorDB validates its metadata database at startup, applies ordered schema migrations, and creates a pre-migration backup. Documents remain pending until their semantic vectors are committed, so an interrupted index can be repaired on the next scan. Damaged derived indexes are quarantined rather than silently overwritten, and disconnected watched drives are not treated as deleted libraries.
+Redrob Recall validates its metadata database at startup, applies ordered schema migrations, and creates a pre-migration backup. Documents remain pending until their semantic vectors are committed, so an interrupted index can be repaired on the next scan. Damaged derived indexes are quarantined rather than silently overwritten, and disconnected watched drives are not treated as deleted libraries.
 
 Use **Settings → Storage** to run a health check or create a manual metadata backup. Backups include extracted passages and paths and should be protected with operating-system full-disk encryption.
 
@@ -111,10 +111,10 @@ See [PRIVACY.md](PRIVACY.md) for the complete data flow and deletion instruction
 
 ## Local API
 
-The API binds only to `127.0.0.1` and defaults to port `47331`. Every endpoint requires the token stored at `~/.redrob/vectordb/local-api-token`:
+The API binds only to `127.0.0.1` and defaults to port `47331`. Every endpoint requires the token stored at `~/.redrob/recall/local-api-token`:
 
 ```bash
-TOKEN="$(cat ~/.redrob/vectordb/local-api-token)"
+TOKEN="$(cat ~/.redrob/recall/local-api-token)"
 
 curl -H "Authorization: Bearer $TOKEN" \
   http://127.0.0.1:47331/health
@@ -130,7 +130,7 @@ curl -X POST http://127.0.0.1:47331/v1/ask \
   -d '{"query":"What did we decide about India?","sourceIds":[],"maxSources":6}'
 ```
 
-Changing the Local API switch or port takes effect after restarting Redrob VectorDB. Ask through the local API follows the same privacy setting and Redrob connection requirements as the UI.
+Changing the Local API switch or port takes effect after restarting Redrob Recall. Ask through the local API follows the same privacy setting and Redrob connection requirements as the UI.
 
 ## Useful commands
 
@@ -146,7 +146,7 @@ cargo clippy --locked --manifest-path src-tauri/Cargo.toml --all-targets -- -D w
 
 ## Licensing and attribution
 
-Redrob VectorDB is licensed under the [Apache License 2.0](LICENSE); see [NOTICE](NOTICE). Embedded open-source components retain their own licenses. See [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md). Qdrant and Qdrant Edge are projects of Qdrant Solutions GmbH; Redrob VectorDB is a Redrob product and is not presented as an official Qdrant distribution.
+Redrob Recall is licensed under the [Apache License 2.0](LICENSE); see [NOTICE](NOTICE). Embedded open-source components retain their own licenses. See [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md). Qdrant and Qdrant Edge are projects of Qdrant Solutions GmbH; Redrob Recall is a Redrob product and is not presented as an official Qdrant distribution.
 
 ## Project documentation
 

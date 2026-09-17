@@ -40,7 +40,7 @@ pub struct AppState(Arc<Inner>);
 impl AppState {
     pub fn initialize(app_handle: AppHandle) -> Result<Self> {
         let base_dirs = BaseDirs::new().context("home directory is unavailable")?;
-        let data_dir = base_dirs.home_dir().join(".redrob").join("vectordb");
+        let data_dir = base_dirs.home_dir().join(".redrob").join("recall");
         std::fs::create_dir_all(&data_dir)?;
         #[cfg(unix)]
         {
@@ -165,7 +165,7 @@ impl AppState {
         let trimmed = api_key.trim();
         anyhow::ensure!(!trimmed.is_empty(), "API key cannot be empty");
         anyhow::ensure!(trimmed.len() >= 16, "that API key is too short");
-        let entry = keyring::Entry::new("ai.redrob.vectordb", "redrob-api-key")
+        let entry = keyring::Entry::new("ai.redrob.recall", "redrob-api-key")
             .context("the operating system credential store is unavailable")?;
         entry
             .set_password(trimmed)
@@ -177,7 +177,7 @@ impl AppState {
 
     pub fn disconnect(&self) {
         *self.0.api_key.write() = None;
-        if let Ok(entry) = keyring::Entry::new("ai.redrob.vectordb", "redrob-api-key") {
+        if let Ok(entry) = keyring::Entry::new("ai.redrob.recall", "redrob-api-key") {
             let _ = entry.delete_credential();
         }
         self.emit_snapshot();
@@ -330,7 +330,7 @@ fn open_shard(path: &Path) -> Result<(EdgeShard, bool)> {
 }
 
 fn load_api_key() -> Result<String> {
-    let entry = keyring::Entry::new("ai.redrob.vectordb", "redrob-api-key")?;
+    let entry = keyring::Entry::new("ai.redrob.recall", "redrob-api-key")?;
     entry
         .get_password()
         .context("no Redrob API key in the OS keyring")

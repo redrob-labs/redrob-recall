@@ -1,12 +1,12 @@
-# Redrob VectorDB Privacy
+# Redrob Recall Privacy
 
 _Last updated: September 7, 2026_
 
-Redrob VectorDB is designed as a local-first application. This document describes the implemented data flow; it is not a substitute for Redrob’s organization-wide privacy policy or the terms that apply to the Redrob API.
+Redrob Recall is designed as a local-first application. This document describes the implemented data flow; it is not a substitute for Redrob’s organization-wide privacy policy or the terms that apply to the Redrob API.
 
 ## Data kept on your device
 
-The app stores the following under `~/.redrob/vectordb`:
+The app stores the following under `~/.redrob/recall`:
 
 - paths and metadata for folders and files you selected;
 - text passages extracted from supported files;
@@ -47,7 +47,7 @@ FastEmbed downloads the multilingual embedding model when it is needed for the f
 
 ## Local API
 
-When enabled, the API listens on `127.0.0.1` only. `/health`, `/v1/search`, and `/v1/ask` all require the bearer token in `~/.redrob/vectordb/local-api-token`. Other software running under your user account may be able to read files that account can read, so install only trusted local applications. API setting changes take effect after app restart.
+When enabled, the API listens on `127.0.0.1` only. `/health`, `/v1/search`, and `/v1/ask` all require the bearer token in `~/.redrob/recall/local-api-token`. Other software running under your user account may be able to read files that account can read, so install only trusted local applications. API setting changes take effect after app restart.
 
 ## Telemetry
 
@@ -57,7 +57,7 @@ The application does not include an analytics, advertising, crash-reporting, or 
 
 - **Settings → Clear local index** removes searchable metadata, passages, and vectors but does not modify original files, watched-folder settings, or previously created backups.
 - **Disconnect Redrob** removes the stored API key from the operating system credential manager.
-- To remove all app data, quit Redrob VectorDB and delete `~/.redrob/vectordb`.
+- To remove all app data, quit Redrob Recall and delete `~/.redrob/recall`.
 
 Removing a watched folder stops future indexing of it. Run **Check now** or clear/rebuild the local index to immediately reconcile files that were previously indexed.
 

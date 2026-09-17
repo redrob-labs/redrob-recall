@@ -1,6 +1,6 @@
 # Third-Party Notices
 
-Redrob VectorDB includes open-source software. Each component remains subject to its own license; no Redrob trademark or application license changes those terms.
+Redrob Recall includes open-source software. Each component remains subject to its own license; no Redrob trademark or application license changes those terms.
 
 ## Principal components
 
@@ -23,7 +23,7 @@ The installed npm and Cargo lockfiles identify exact versions and transitive dep
 
 ## Qdrant notice
 
-Qdrant and Qdrant Edge are licensed under Apache License 2.0. Copyright belongs to their respective contributors. Redrob VectorDB uses Qdrant Edge as an embedded vector-search component. “Qdrant” is used only to identify that third-party technology; Redrob VectorDB is not an official Qdrant product.
+Qdrant and Qdrant Edge are licensed under Apache License 2.0. Copyright belongs to their respective contributors. Redrob Recall uses Qdrant Edge as an embedded vector-search component. “Qdrant” is used only to identify that third-party technology; Redrob Recall is not an official Qdrant product.
 
 Apache License 2.0: https://www.apache.org/licenses/LICENSE-2.0
 

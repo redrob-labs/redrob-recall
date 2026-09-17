@@ -118,7 +118,7 @@ function mockSnapshot(): AppSnapshot {
       keyLabel: mockConnected ? "This device" : undefined,
       endpoint: defaultSettings.redrobBaseUrl,
     },
-    dataDirectory: "~/.redrob/vectordb",
+    dataDirectory: "~/.redrob/recall",
     appVersion: "0.1.0",
   };
 }
@@ -230,7 +230,7 @@ export const bridge = {
   },
   async createBackup(): Promise<string> {
     if (isDesktop) return invoke("create_library_backup");
-    return "~/.redrob/vectordb/backups/demo-backup.db";
+    return "~/.redrob/recall/backups/demo-backup.db";
   },
   async checkLibraryHealth(): Promise<string> {
     if (isDesktop) return invoke("check_library_health");

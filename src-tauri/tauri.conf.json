@@ -1,8 +1,8 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "Redrob VectorDB",
+  "productName": "Redrob Recall",
   "version": "0.1.0",
-  "identifier": "ai.redrob.vectordb",
+  "identifier": "ai.redrob.recall",
   "build": {
     "beforeDevCommand": "npm run dev",
     "devUrl": "http://localhost:1420",
@@ -12,7 +12,7 @@
   "app": {
     "windows": [
       {
-        "title": "Redrob VectorDB",
+        "title": "Redrob Recall",
         "width": 1240,
         "height": 780,
         "minWidth": 960,
@@ -33,7 +33,7 @@
     "createUpdaterArtifacts": false,
     "category": "Productivity",
     "shortDescription": "Private search for everything on your computer",
-    "longDescription": "Redrob VectorDB indexes files locally so you can search and ask across everything on your computer without uploading your library.",
+    "longDescription": "Redrob Recall indexes files locally so you can search and ask across everything on your computer without uploading your library.",
     "copyright": "Copyright © 2026 Redrob",
     "licenseFile": "../LICENSE",
     "linux": {

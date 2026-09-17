@@ -4,7 +4,7 @@ dist/
 src-tauri/target/
 
 # Local application data
-.redrob-vectordb/
+.redrob-recall/
 *.db
 *.db-shm
 *.db-wal

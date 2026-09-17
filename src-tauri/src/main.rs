@@ -1,5 +1,5 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 fn main() {
-    redrob_vectordb_lib::run();
+    redrob_recall_lib::run();
 }

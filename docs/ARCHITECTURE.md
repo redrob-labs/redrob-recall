@@ -1,8 +1,8 @@
-# Redrob VectorDB Architecture
+# Redrob Recall Architecture
 
 ## Product boundary
 
-Redrob VectorDB is an installed local application. It does not modify Redrob Console and does not require a separately managed Qdrant server, Docker, or a cloud vector database.
+Redrob Recall is an installed local application. It does not modify Redrob Console and does not require a separately managed Qdrant server, Docker, or a cloud vector database.
 
 ```text
 Selected folders
@@ -32,7 +32,7 @@ Tauri owns application lifecycle, single-instance behavior, native dialogs, file
 
 SQLite stores settings, document metadata, extracted chunks, status, and an FTS5 index. Qdrant Edge runs in-process and persists named 384-dimensional cosine vectors. FastEmbed lazily downloads and caches `MultilingualE5Small` in the application model directory.
 
-The canonical data directory is `~/.redrob/vectordb`. The app can rebuild all derived data from the user's original files.
+The canonical data directory is `~/.redrob/recall`. The app can rebuild all derived data from the user's original files.
 
 ## Indexing lifecycle
 
@@ -68,9 +68,9 @@ A failed Qdrant Edge load quarantines the derived shard and marks every indexed 
 
 ## Signed updates
 
-Development builds do not configure an update endpoint. Production builds embed the updater public verification key and the fixed stable endpoint `https://cdn.redrob.ai/vectordb/latest.json`. A numeric release tag builds signed updater artifacts into a draft GitHub Release, where the exact files remain private from the stable channel during QA.
+Development builds do not configure an update endpoint. Production builds embed the updater public verification key and the fixed stable endpoint `https://cdn.redrob.ai/recall/latest.json`. A numeric release tag builds signed updater artifacts into a draft GitHub Release, where the exact files remain private from the stable channel during QA.
 
-Publishing an approved non-prerelease GitHub Release starts a separate protected promotion job. It requires a successful tag workflow for the exact `main`-reachable tag commit, downloads the release's snapshotted assets by asset ID, and verifies GitHub SHA-256 digests before reading the current stable manifest directly from the CDN origin. It copies non-manifest assets byte-for-byte to immutable `vectordb/v<version>/` CDN keys. It rewrites only the platform URLs in the signed Tauri metadata, downloads and hashes every referenced public URL, and conditionally uploads `vectordb/latest.json` last against the origin state it validated. Versioned assets use a one-year immutable public cache policy; stable metadata uses `no-store, max-age=0`. Existing versioned keys may be reused only when their origin bytes, SHA-256 metadata, size, content type, and cache policy match, and stable versions can move only forward.
+Publishing an approved non-prerelease GitHub Release starts a separate protected promotion job. It requires a successful tag workflow for the exact `main`-reachable tag commit, downloads the release's snapshotted assets by asset ID, and verifies GitHub SHA-256 digests before reading the current stable manifest directly from the CDN origin. It copies non-manifest assets byte-for-byte to immutable `recall/v<version>/` CDN keys. It rewrites only the platform URLs in the signed Tauri metadata, downloads and hashes every referenced public URL, and conditionally uploads `recall/latest.json` last against the origin state it validated. Versioned assets use a one-year immutable public cache policy; stable metadata uses `no-store, max-age=0`. Existing versioned keys may be reused only when their origin bytes, SHA-256 metadata, size, content type, and cache policy match, and stable versions can move only forward.
 
 The CDN is a distribution boundary, not a signing authority. It never receives the updater private key. The frontend checks for updates only on explicit user action, and Tauri accepts an artifact only when its signature verifies against the public key embedded in the installed application.
 

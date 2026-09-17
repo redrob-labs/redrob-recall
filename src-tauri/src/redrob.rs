@@ -200,7 +200,7 @@ pub async fn ask(state: AppState, request: AskRequest) -> Result<AskResponse, Re
         .timeout(Duration::from_secs(60))
         .redirect(reqwest::redirect::Policy::none())
         .retry(reqwest::retry::never())
-        .user_agent(concat!("Redrob-VectorDB/", env!("CARGO_PKG_VERSION")))
+        .user_agent(concat!("Redrob-Recall/", env!("CARGO_PKG_VERSION")))
         .build()
         .map_err(RedrobError::local)?;
     let endpoint = format!(

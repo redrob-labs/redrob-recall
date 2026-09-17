@@ -1,15 +1,15 @@
 # Release Guide
 
-Redrob VectorDB releases are built as signed native installers by `.github/workflows/release.yml`. A pushed `vMAJOR.MINOR.PATCH` tag creates or updates a **draft** GitHub Release. The release assets remain draft-only while the exact signed files pass platform QA. Publishing a non-prerelease GitHub Release promotes those files to the stable updater CDN.
+Redrob Recall releases are built as signed native installers by `.github/workflows/release.yml`. A pushed `vMAJOR.MINOR.PATCH` tag creates or updates a **draft** GitHub Release. The release assets remain draft-only while the exact signed files pass platform QA. Publishing a non-prerelease GitHub Release promotes those files to the stable updater CDN.
 
-Production builds always check `https://cdn.redrob.ai/vectordb/latest.json`. Promotion stores artifacts at immutable `vectordb/vMAJOR.MINOR.PATCH/<asset-name>` keys and publishes the mutable `vectordb/latest.json` manifest only after every referenced artifact is publicly reachable.
+Production builds always check `https://cdn.redrob.ai/recall/latest.json`. Promotion stores artifacts at immutable `recall/vMAJOR.MINOR.PATCH/<asset-name>` keys and publishes the mutable `recall/latest.json` manifest only after every referenced artifact is publicly reachable.
 
 ## One-time signing and CDN setup
 
 Generate the Tauri updater signing key pair on a trusted, encrypted administrator machine:
 
 ```bash
-npm run tauri signer generate -- -w ~/.tauri/redrob-vectordb.key
+npm run tauri signer generate -- -w ~/.tauri/redrob-recall.key
 ```
 
 Back up the private key and its password in the Redrob secrets manager. Losing it prevents installed copies from trusting future updates. Never put private keys, certificates, passwords, or `.env` files in this repository.
@@ -40,7 +40,7 @@ The published-release promotion job uses these existing organization secrets thr
 | `REDROB_CDN_SECRET_ACCESS_KEY` | S3-compatible secret key                            |
 | `REDROB_CDN_BUCKET`            | Bare S3 bucket name                                 |
 
-The CDN credentials are available only to the promotion's S3 object-access steps, use region `ap-northeast-2`, and must be scoped to the `vectordb/` distribution path where possible. The asset-validation script runs in a separate credential-free step. Public access is supplied by the bucket/CDN policy; the workflow never sets a `public-read` object ACL.
+The CDN credentials are available only to the promotion's S3 object-access steps, use region `ap-northeast-2`, and must be scoped to the `recall/` distribution path where possible. The asset-validation script runs in a separate credential-free step. Public access is supplied by the bucket/CDN policy; the workflow never sets a `public-read` object ACL.
 
 The workflow verifies that release commits are reachable from `origin/main`, requires `npm run verify` and the pinned RustSec audit to pass, serializes matrix builds to prevent concurrent `latest.json` updates, and refuses missing signing or CDN configuration. Promotion also requires a successful tag-triggered release workflow for the exact tag commit and downloads every snapshotted asset by GitHub asset ID. Release configuration is generated only inside the runner as `src-tauri/tauri.release.conf.json`, which is ignored by Git.
 
@@ -61,7 +61,7 @@ Tauri requires signed updater artifacts and describes the key model in its [offi
 5. Create and push the matching numeric release tag:
 
    ```bash
-   git tag -s v0.1.0 -m "Redrob VectorDB v0.1.0"
+   git tag -s v0.1.0 -m "Redrob Recall v0.1.0"
    git push origin v0.1.0
    ```
 
@@ -70,9 +70,9 @@ Tauri requires signed updater artifacts and describes the key model in its [offi
 8. Confirm native signatures, updater signatures, checksums, release notes, and QA evidence. A named release owner may then publish the non-prerelease GitHub Release.
 9. The `release.published` event starts the protected `publish-cdn` job. It validates the tag, `main` ancestry, and successful tag workflow, then downloads every snapshotted asset by its GitHub asset ID. GitHub's uploaded state, SHA-256 digest, local size, platform bundle type, duplicate/unsafe names, and updater metadata are all checked before promotion.
 10. Promotion reads the current manifest directly from the S3 origin, requires the candidate to be newer, uploads every non-manifest asset first, and never overwrites a versioned key with different bytes. Existing objects are accepted only when their origin bytes, SHA-256 metadata, size, content type, and cache policy match.
-11. The job downloads every referenced updater payload from the public CDN and checks its size and SHA-256 before conditionally uploading `vectordb/latest.json` last against the origin state it validated. It then polls the public manifest with cache-busting URLs until it matches the generated manifest semantically.
+11. The job downloads every referenced updater payload from the public CDN and checks its size and SHA-256 before conditionally uploading `recall/latest.json` last against the origin state it validated. It then polls the public manifest with cache-busting URLs until it matches the generated manifest semantically.
 
-Only stable numeric versions are promotable. Drafts and prereleases are never sent to the normal client channel. The generated manifest retains Tauri signatures but replaces private GitHub asset URLs with `https://cdn.redrob.ai/vectordb/v<version>/<URL-encoded-name>` URLs. Promotion does not receive or use the updater private signing key.
+Only stable numeric versions are promotable. Drafts and prereleases are never sent to the normal client channel. The generated manifest retains Tauri signatures but replaces private GitHub asset URLs with `https://cdn.redrob.ai/recall/v<version>/<URL-encoded-name>` URLs. Promotion does not receive or use the updater private signing key.
 
 ## CDN caching and acceptance
 
@@ -80,7 +80,7 @@ Versioned assets use `Cache-Control: public, max-age=31536000, immutable`. The s
 
 After promotion, confirm:
 
-- `https://cdn.redrob.ai/vectordb/latest.json` returns the approved version and all four required platform keys;
+- `https://cdn.redrob.ai/recall/latest.json` returns the approved version and all four required platform keys;
 - every platform URL uses the versioned Redrob CDN prefix and is anonymously reachable;
 - downloaded updater bytes and signatures are the approved draft-release bytes;
 - immutable assets have the long-lived cache policy and `latest.json` has the no-store policy; and
