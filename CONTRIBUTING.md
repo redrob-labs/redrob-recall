@@ -115,3 +115,18 @@ the `production-release` environment. That ancestor check is what makes the bran
 cut from `develop` is refused rather than shipped.
 
 Run `npm run check` and `cargo test --workspace` before pushing.
+
+## Dependency updates
+
+Dependabot **version updates are off**: they produced a standing queue of pull requests, each
+needing its own CI run, and on this repository the churn cost more than it caught. Two things
+replace them:
+
+- **Dependabot security updates are on.** A dependency with a known advisory still gets a pull
+  request opened automatically. That is the part worth interrupting for.
+- **The advisory job gates every pull request.** `cargo audit` runs against the committed
+  lockfile, so a vulnerable dependency cannot merge even if nobody read an alert. A security
+  update is a notification; this is the control.
+
+Routine bumps are therefore deliberate: bump what you need for the change you are making, in the
+same pull request, and say why in the body. Do not sweep unrelated versions into a feature branch.
