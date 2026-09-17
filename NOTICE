@@ -1,0 +1,21 @@
+Redrob VectorDB
+Copyright 2026 Redrob
+
+This product is licensed under the Apache License, Version 2.0 (the "License").
+You may obtain a copy of the License in the file LICENSE distributed with this
+product, or at http://www.apache.org/licenses/LICENSE-2.0
+
+This product embeds third-party open-source software. Each component remains
+subject to its own license; the Apache License granted above does not change
+those terms. The components, their licenses, and their upstream projects are
+identified in THIRD_PARTY_NOTICES.md, and the shipped npm and Cargo lockfiles
+identify the exact versions used by a given build.
+
+Qdrant and Qdrant Edge are licensed under the Apache License, Version 2.0, and
+are projects of Qdrant Solutions GmbH. Redrob VectorDB uses Qdrant Edge as an
+embedded vector-search component. "Qdrant" is used only to identify that
+third-party technology; Redrob VectorDB is not an official Qdrant product and is
+not endorsed by Qdrant Solutions GmbH.
+
+"Redrob" and the Redrob logo are trademarks of Redrob. The Apache License grants
+no rights to use them; see LICENSE section 6.

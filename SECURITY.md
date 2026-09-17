@@ -2,7 +2,7 @@
 
 ## Supported versions
 
-Redrob VectorDB is currently in private preview. Security fixes are applied to the latest version on the `main` branch.
+Redrob VectorDB is pre-1.0. Security fixes are applied to the latest version on the `main` branch; there is no backport branch for earlier tags.
 
 ## Reporting a vulnerability
 

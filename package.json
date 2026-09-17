@@ -5,10 +5,10 @@
   "description": "Search and ask across everything on your computer.",
   "repository": {
     "type": "git",
-    "url": "https://github.com/savagemanage/openVectorDB.git"
+    "url": "https://github.com/redrob-labs/redrob-vectordb.git"
   },
-  "homepage": "https://github.com/savagemanage/openVectorDB#readme",
-  "bugs": "https://github.com/savagemanage/openVectorDB/issues",
+  "homepage": "https://github.com/redrob-labs/redrob-vectordb#readme",
+  "bugs": "https://github.com/redrob-labs/redrob-vectordb/issues",
   "type": "module",
   "scripts": {
     "dev": "vite",

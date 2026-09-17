@@ -146,7 +146,7 @@ cargo clippy --locked --manifest-path src-tauri/Cargo.toml --all-targets -- -D w
 
 ## Licensing and attribution
 
-Redrob VectorDB application code is proprietary unless Redrob publishes a different license. Embedded open-source components retain their own licenses. See [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md). Qdrant and Qdrant Edge are projects of Qdrant Solutions GmbH; Redrob VectorDB is a Redrob product and is not presented as an official Qdrant distribution.
+Redrob VectorDB is licensed under the [Apache License 2.0](LICENSE); see [NOTICE](NOTICE). Embedded open-source components retain their own licenses. See [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md). Qdrant and Qdrant Edge are projects of Qdrant Solutions GmbH; Redrob VectorDB is a Redrob product and is not presented as an official Qdrant distribution.
 
 ## Project documentation
 

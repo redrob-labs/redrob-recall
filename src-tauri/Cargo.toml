@@ -5,9 +5,9 @@ description = "Private, local-first semantic search for everything on your compu
 authors = ["Redrob"]
 edition = "2021"
 rust-version = "1.95"
-license = "LicenseRef-Proprietary"
-repository = "https://github.com/savagemanage/openVectorDB"
-homepage = "https://github.com/savagemanage/openVectorDB"
+license = "Apache-2.0"
+repository = "https://github.com/redrob-labs/redrob-vectordb"
+homepage = "https://github.com/redrob-labs/redrob-vectordb"
 readme = "../README.md"
 
 [lib]
