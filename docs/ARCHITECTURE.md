@@ -68,11 +68,13 @@ A failed Qdrant Edge load quarantines the derived shard and marks every indexed 
 
 ## Signed updates
 
-Development builds do not configure an update endpoint. Production builds embed the updater public verification key and the fixed stable endpoint `https://cdn.redrob.ai/recall/latest.json`. A numeric release tag builds signed updater artifacts into a draft GitHub Release, where the exact files remain private from the stable channel during QA.
+Development builds do not configure an update endpoint. Production builds embed the updater public verification key and the fixed stable endpoint `https://github.com/redrob-labs/redrob-recall/releases/latest/download/latest.json`. A numeric release tag builds signed updater artifacts into a draft GitHub Release.
 
-Publishing an approved non-prerelease GitHub Release starts a separate protected promotion job. It requires a successful tag workflow for the exact `main`-reachable tag commit, downloads the release's snapshotted assets by asset ID, and verifies GitHub SHA-256 digests before reading the current stable manifest directly from the CDN origin. It copies non-manifest assets byte-for-byte to immutable `recall/v<version>/` CDN keys. It rewrites only the platform URLs in the signed Tauri metadata, downloads and hashes every referenced public URL, and conditionally uploads `recall/latest.json` last against the origin state it validated. Versioned assets use a one-year immutable public cache policy; stable metadata uses `no-store, max-age=0`. Existing versioned keys may be reused only when their origin bytes, SHA-256 metadata, size, content type, and cache policy match, and stable versions can move only forward.
+GitHub Releases is the channel itself; there is no CDN and no promotion job. The draft gate is enforced by how the endpoint resolves rather than by a separate pipeline: `releases/latest/download/...` serves only the newest published, non-prerelease release, so the exact signed files stay invisible to installed clients while QA runs on them. Publishing the reviewed draft is what makes the version live, and the assets a client downloads are byte-identical to the ones QA approved, because GitHub does not permit a published asset to be replaced with different bytes under the same name.
 
-The CDN is a distribution boundary, not a signing authority. It never receives the updater private key. The frontend checks for updates only on explicit user action, and Tauri accepts an artifact only when its signature verifies against the public key embedded in the installed application.
+The tag workflow's `verify-release-assets` job asserts the contract before anyone can publish: `latest.json` must be attached, its version must match the tag, and all four platform entries (`linux-x86_64`, `darwin-aarch64`, `darwin-x86_64`, `windows-x86_64`) must be signed and point at this repository's own release assets. A missing or misdirected manifest does not break installation — it silently freezes every existing client on its current version, which is why it is a build failure rather than a review item.
+
+The distribution channel is not a signing authority. It never receives the updater private key. The frontend checks for updates only on explicit user action, and Tauri accepts an artifact only when its signature verifies against the public key embedded in the installed application.
 
 ## Trust boundaries
 
@@ -85,6 +87,6 @@ The CDN is a distribution boundary, not a signing authority. It never receives t
 
 ## Release constraints
 
-Qdrant Edge 0.8.0 currently requires the narrowly scoped Rust compiler workaround documented in `.cargo/config.toml`. Cross-platform installer builds require the Tauri native prerequisites and platform signing/notarization credentials. Apple Developer ID certificate/notarization secrets, `WIN_CSC_LINK`, `WIN_CSC_KEY_PASSWORD`, updater signing keys, and CDN credentials must never be stored in the repository.
+Qdrant Edge 0.8.0 currently requires the narrowly scoped Rust compiler workaround documented in `.cargo/config.toml`. Cross-platform installer builds require the Tauri native prerequisites and platform signing/notarization credentials. Apple Developer ID certificate/notarization secrets, `WIN_CSC_LINK`, `WIN_CSC_KEY_PASSWORD`, and updater signing keys must never be stored in the repository.
 
-A bad stable release is corrected with a newer signed patch release; immutable CDN assets are not replaced and clients are not rolled back to an older version. Updater key rotation still requires a transition release trusted by the existing embedded key.
+A bad stable release is corrected with a newer signed patch release; published release assets are not replaced and clients are not rolled back to an older version. Returning the bad release to draft removes it from `latest`. Updater key rotation still requires a transition release trusted by the existing embedded key.

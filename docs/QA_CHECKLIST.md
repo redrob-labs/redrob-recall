@@ -55,24 +55,21 @@ Complete this checklist against the exact signed draft-release artifacts. The Gi
 - [ ] CSP blocks unexpected network, script, and resource origins.
 - [ ] Dependency audits pass and third-party Action SHAs are reviewed.
 
-## Signed updater and CDN promotion
+## Signed updater and release publication
 
 - [ ] A previous signed version detects the draft promoted to an isolated test channel.
 - [ ] Correct update downloads, verifies, installs, and relaunches on every platform.
 - [ ] A modified artifact and invalid signature are rejected.
 - [ ] No update is offered for the same or an older version.
 - [ ] Backup/migration behavior is verified across the update.
-- [ ] `https://cdn.redrob.ai/recall/latest.json` remains unchanged while the GitHub Release and its assets are drafts.
+- [ ] `https://github.com/redrob-labs/redrob-recall/releases/latest/download/latest.json` still returns the PREVIOUS version while this release is a draft — a draft is not `latest`, and this is the whole draft gate.
 - [ ] The approved release is a non-prerelease numeric `vMAJOR.MINOR.PATCH` tag whose commit is reachable from `origin/main`.
-- [ ] Publishing the GitHub Release starts the protected `publish-cdn` job; no draft asset is promoted before that event.
-- [ ] Promotion rejects a missing/unsupported platform, wrong platform bundle type, signature, payload, GitHub digest, duplicate/unsafe asset, size mismatch, or candidate version that is not newer than stable.
-- [ ] Promotion requires a successful tag-triggered release workflow for the exact published tag commit and downloads the snapshotted release assets by asset ID.
-- [ ] Stable metadata contains `linux-x86_64`, `darwin-aarch64`, `darwin-x86_64`, and `windows-x86_64`; Windows selects the signed NSIS updater payload.
-- [ ] Every platform URL begins with `https://cdn.redrob.ai/recall/v<version>/`, is anonymously reachable with GET, and returns the exact approved size and SHA-256 bytes.
-- [ ] Versioned assets report `public, max-age=31536000, immutable`; `latest.json` reports `application/json` and `no-store, max-age=0`.
-- [ ] Existing versioned objects cannot be replaced with different content, and an interrupted asset upload leaves the previous stable `latest.json` intact.
-- [ ] A concurrent, stale, or externally racing publication fails its origin precondition and cannot move stable to the same or an older version.
-- [ ] Public `latest.json` semantically matches the generated promotion manifest after cache-busted verification.
+- [ ] The `verify-release-assets` job passed on the tag run: `latest.json` attached, version matching the tag, an AppImage, `.deb`, `.dmg`, `.exe` and `.msi` present.
+- [ ] `latest.json` contains signed entries for `linux-x86_64`, `darwin-aarch64`, `darwin-x86_64`, and `windows-x86_64`; Windows selects the signed NSIS updater payload.
+- [ ] Every platform URL begins with `https://github.com/redrob-labs/redrob-recall/releases/download/`, is anonymously reachable with GET after publishing, and returns the exact approved size and SHA-256 bytes.
+- [ ] The bytes a client downloads after publishing are the same bytes QA downloaded from the draft — GitHub does not allow a published asset to be replaced under the same name, so verify the digests rather than assuming.
+- [ ] A modified artifact and an invalid signature are still rejected by the installed client.
+- [ ] Publishing is the only action that makes the version live; no separate promotion job exists to wait for.
 
 ## Release decision
 
@@ -81,4 +78,4 @@ Complete this checklist against the exact signed draft-release artifacts. The Gi
 - [ ] Known limitations and support scope are in the release notes.
 - [ ] Privacy, security, license, notices, and changelog were reviewed.
 - [ ] A named release owner approves publishing the draft.
-- [ ] The publication-triggered CDN job and post-promotion acceptance checks pass.
+- [ ] The post-publication acceptance checks in `docs/RELEASING.md` pass: the `latest` manifest returns the approved version, every platform URL is anonymously reachable, and a previous production build updates into it on every platform.

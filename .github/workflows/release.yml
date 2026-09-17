@@ -1,10 +1,11 @@
 name: Signed desktop release
 
+# Only a tag builds. There used to be a `release: [published]` trigger here for the CDN
+# promotion job; with GitHub Releases as the channel itself, publishing the draft IS the
+# promotion, so a second workflow run on that event would have nothing to do.
 on:
   push:
     tags: ["v*.*.*"]
-  release:
-    types: [published]
 
 permissions:
   contents: read
@@ -289,358 +290,85 @@ jobs:
             }
           }
 
-  publish-cdn:
-    name: Publish stable updater CDN
-    if: github.event_name == 'release' && github.event.action == 'published' && github.event.release.prerelease == false
-    permissions:
-      actions: read
-      contents: read
-    environment: production-release
-    concurrency:
-      group: recall-cdn-stable
-      cancel-in-progress: false
+
+  # The CDN promotion job that used to live here is gone: GitHub Releases is now the
+  # update channel itself, so there is nothing to copy anywhere. What that job also
+  # did, though, was VERIFY the published channel -- so its checks are re-pointed
+  # here rather than dropped. Without them the classic failure is silent: the app
+  # installs fine and never updates again, because `latest.json` is missing or its
+  # platform URLs point somewhere a client cannot reach.
+  verify-release-assets:
+    name: Updater contract on the draft release
+    if: github.event_name == 'push'
+    needs: [build]
     runs-on: ubuntu-24.04
-    timeout-minutes: 30
+    timeout-minutes: 15
+    permissions:
+      contents: read
     steps:
-      - name: Check out published release source
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          fetch-depth: 0
-          ref: ${{ github.event.release.tag_name }}
-
-      - name: Set up Node.js
-        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
-        with:
-          node-version: 22
-
-      - name: Validate published release provenance
-        shell: bash
+      - name: Assert the draft release carries a usable updater manifest
         env:
-          GH_TOKEN: ${{ github.token }}
-          RELEASE_TAG: ${{ github.event.release.tag_name }}
-          RELEASE_TARGET: ${{ github.event.release.target_commitish }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_TAG: ${{ github.ref_name }}
+        shell: bash
         run: |
           set -euo pipefail
-          if [[ ! "$RELEASE_TAG" =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]; then
-            echo "::error::Published release tag must match vMAJOR.MINOR.PATCH"
+
+          # The release is still a draft at this point, which is deliberate: draft
+          # assets are invisible to `releases/latest/download/...`, so QA happens
+          # before any installed client can see the version.
+          release_json="$(gh api "repos/${GITHUB_REPOSITORY}/releases/tags/${RELEASE_TAG}")"
+          draft="$(printf '%s' "$release_json" | jq -r '.draft')"
+          if [ "$draft" != "true" ]; then
+            echo "::error::Release ${RELEASE_TAG} must still be a draft when the build finishes"
             exit 1
           fi
-          if [[ ! "$RELEASE_TARGET" =~ ^[A-Za-z0-9][A-Za-z0-9._/-]*$ ]] || [[ "$RELEASE_TARGET" == *..* ]]; then
-            echo "::error::Release target_commitish is unsafe or unsupported"
+
+          names="$(printf '%s' "$release_json" | jq -r '.assets[].name')"
+          echo "Assets on ${RELEASE_TAG}:"
+          printf '  %s\n' $names
+
+          # latest.json IS the feed on GitHub Releases. Missing it does not fail an
+          # install, it silently freezes every existing client on its current version.
+          if ! printf '%s\n' $names | grep -qx 'latest.json'; then
+            echo "::error::latest.json is not attached; published clients would never see this release"
             exit 1
           fi
-          git fetch --no-tags origin main:refs/remotes/origin/main
-          git fetch --force origin "refs/tags/$RELEASE_TAG:refs/tags/$RELEASE_TAG"
-          TAG_COMMIT="$(git rev-parse --verify "refs/tags/$RELEASE_TAG^{commit}")" || {
-            echo "::error::Release tag does not resolve to a commit"
-            exit 1
-          }
-          TARGET_COMMIT=""
-          for candidate in "refs/remotes/origin/$RELEASE_TARGET" "refs/tags/$RELEASE_TARGET" "$RELEASE_TARGET"; do
-            if TARGET_COMMIT="$(git rev-parse --verify "$candidate^{commit}" 2>/dev/null)"; then
-              break
+
+          for pattern in '\.AppImage$' '\.deb$' '\.dmg$' '\.exe$' '\.msi$'; do
+            if ! printf '%s\n' $names | grep -qE "$pattern"; then
+              echo "::error::no asset matching ${pattern} -- expected Linux, macOS and Windows bundles"
+              exit 1
             fi
           done
-          if [[ -z "$TARGET_COMMIT" ]]; then
-            echo "::error::Release target_commitish does not resolve to a commit"
-            exit 1
-          fi
-          if ! git merge-base --is-ancestor "$TAG_COMMIT" origin/main; then
-            echo "::error::Published release tag commit is not reachable from origin/main"
-            exit 1
-          fi
-          if ! git merge-base --is-ancestor "$TARGET_COMMIT" origin/main; then
-            echo "::error::Published release target_commitish is not reachable from origin/main"
-            exit 1
-          fi
-          successful_runs="$RUNNER_TEMP/successful-release-runs.json"
-          gh api --paginate --slurp \
-            -H "Accept: application/vnd.github+json" \
-            "repos/$GITHUB_REPOSITORY/actions/workflows/release.yml/runs?event=push&status=success&per_page=100" \
-            > "$successful_runs"
-          if ! jq -e --arg sha "$TAG_COMMIT" \
-            'any(.[].workflow_runs[]; .head_sha == $sha and .conclusion == "success")' \
-            "$successful_runs" > /dev/null; then
-            echo "::error::No successful tag-triggered release workflow exists for the published tag commit"
+
+          manifest_id="$(printf '%s' "$release_json" | jq -r '.assets[] | select(.name == "latest.json") | .id')"
+          gh api -H 'Accept: application/octet-stream' \
+            "repos/${GITHUB_REPOSITORY}/releases/assets/${manifest_id}" > latest.json
+
+          version="$(jq -r '.version' latest.json)"
+          if [ "v${version}" != "${RELEASE_TAG}" ]; then
+            echo "::error::latest.json version ${version} does not match tag ${RELEASE_TAG}"
             exit 1
           fi
 
-      - name: Download exact published release assets
-        shell: bash
-        env:
-          GH_TOKEN: ${{ github.token }}
-          RELEASE_ID: ${{ github.event.release.id }}
-          RELEASE_TAG: ${{ github.event.release.tag_name }}
-        run: |
-          set -euo pipefail
-          ASSETS_JSON="$RUNNER_TEMP/release-assets.json"
-          ASSETS_DIR="$RUNNER_TEMP/release-assets"
-          CDN_PLAN_PATH="$RUNNER_TEMP/cdn-plan.json"
-          CDN_MANIFEST_PATH="$RUNNER_TEMP/cdn-latest.json"
-          mkdir -p "$ASSETS_DIR"
-          gh api --paginate --slurp \
-            -H "Accept: application/vnd.github+json" \
-            "repos/$GITHUB_REPOSITORY/releases/$RELEASE_ID/assets?per_page=100" \
-            | jq 'add' > "$ASSETS_JSON"
-          if [[ "$(jq 'length' "$ASSETS_JSON")" -eq 0 ]]; then
-            echo "::error::Published release has no assets"
-            exit 1
-          fi
-          while IFS= read -r encoded_asset; do
-            asset="$(printf '%s' "$encoded_asset" | base64 --decode)"
-            asset_id="$(jq -er '.id' <<< "$asset")"
-            asset_name="$(jq -er '.name' <<< "$asset")"
-            if [[ ! "$asset_id" =~ ^[1-9][0-9]*$ ]] ||
-               [[ -z "$asset_name" || "$asset_name" == */* || "$asset_name" == *\\* ||
-                  "$asset_name" == *..* || "$asset_name" =~ [[:cntrl:]] ]]; then
-              echo "::error::Published release contains unsafe asset metadata"
+          # Every architecture a build leg produced must be present, and every URL must
+          # point at this repository's own release assets. A URL left pointing at a
+          # decommissioned host is exactly the shape of failure this job exists to catch.
+          for platform in linux-x86_64 darwin-aarch64 darwin-x86_64 windows-x86_64; do
+            url="$(jq -r --arg p "$platform" '.platforms[$p].url // empty' latest.json)"
+            sig="$(jq -r --arg p "$platform" '.platforms[$p].signature // empty' latest.json)"
+            if [ -z "$url" ] || [ -z "$sig" ]; then
+              echo "::error::latest.json is missing a signed entry for ${platform}"
               exit 1
             fi
-            gh api \
-              -H "Accept: application/octet-stream" \
-              "repos/$GITHUB_REPOSITORY/releases/assets/$asset_id" \
-              > "$ASSETS_DIR/$asset_name"
-          done < <(jq -r '.[] | @base64' "$ASSETS_JSON")
-          {
-            echo "RELEASE_TAG=$RELEASE_TAG"
-            echo "RELEASE_ASSETS_PATH=$ASSETS_JSON"
-            echo "RELEASE_ASSETS_DIR=$ASSETS_DIR"
-            echo "CDN_PLAN_PATH=$CDN_PLAN_PATH"
-            echo "CDN_MANIFEST_PATH=$CDN_MANIFEST_PATH"
-          } >> "$GITHUB_ENV"
-
-      - name: Read current stable CDN origin
-        shell: bash
-        env:
-          AWS_ACCESS_KEY_ID: ${{ secrets.REDROB_CDN_ACCESS_KEY_ID }}
-          AWS_SECRET_ACCESS_KEY: ${{ secrets.REDROB_CDN_SECRET_ACCESS_KEY }}
-          AWS_DEFAULT_REGION: ap-northeast-2
-          AWS_REGION: ap-northeast-2
-          REDROB_CDN_BUCKET: ${{ secrets.REDROB_CDN_BUCKET }}
-        run: |
-          set -euo pipefail
-          if [[ -z "${AWS_ACCESS_KEY_ID:-}" || -z "${AWS_SECRET_ACCESS_KEY:-}" || -z "${REDROB_CDN_BUCKET:-}" ]]; then
-            echo "::error::All Redrob CDN credentials and the bucket secret are required"
-            exit 1
-          fi
-          if [[ ! "$REDROB_CDN_BUCKET" =~ ^[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]$ ]] ||
-             [[ "$REDROB_CDN_BUCKET" == *..* ]] ||
-             [[ "$REDROB_CDN_BUCKET" == *.-* ]] ||
-             [[ "$REDROB_CDN_BUCKET" == *-.* ]] ||
-             [[ "$REDROB_CDN_BUCKET" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]] ||
-             [[ "$REDROB_CDN_BUCKET" == xn--* ]] ||
-             [[ "$REDROB_CDN_BUCKET" == *-s3alias ]] ||
-             [[ "$REDROB_CDN_BUCKET" == *--ol-s3 ]]; then
-            echo "::error::REDROB_CDN_BUCKET must be a bare, safe S3 bucket name"
-            exit 1
-          fi
-
-          origin_manifest="$RUNNER_TEMP/origin-current-latest.json"
-          origin_state="$RUNNER_TEMP/origin-latest-state.json"
-          origin_error="$RUNNER_TEMP/origin-latest-error"
-          if origin_metadata="$(aws s3api get-object \
-            --bucket "$REDROB_CDN_BUCKET" \
-            --key "recall/latest.json" \
-            "$origin_manifest" 2>"$origin_error")"; then
-            origin_etag="$(jq -er '.ETag' <<< "$origin_metadata")"
-            jq -n --arg mode "if-match" --arg etag "$origin_etag" \
-              '{ mode: $mode, etag: $etag }' > "$origin_state"
-            echo "CURRENT_MANIFEST_PATH=$origin_manifest" >> "$GITHUB_ENV"
-          elif grep -Eq '\(404\)|Not Found|NoSuchKey' "$origin_error"; then
-            rm -f "$origin_manifest"
-            jq -n --arg mode "if-none-match" '{ mode: $mode }' > "$origin_state"
-          else
-            echo "::error::Unable to read the current stable manifest from the CDN origin"
-            cat "$origin_error" >&2
-            exit 1
-          fi
-          echo "CDN_ORIGIN_STATE_PATH=$origin_state" >> "$GITHUB_ENV"
-
-      - name: Prepare and validate CDN release
-        run: npm run release:cdn:prepare
-
-      - name: Upload and verify immutable versioned assets
-        shell: bash
-        env:
-          AWS_ACCESS_KEY_ID: ${{ secrets.REDROB_CDN_ACCESS_KEY_ID }}
-          AWS_SECRET_ACCESS_KEY: ${{ secrets.REDROB_CDN_SECRET_ACCESS_KEY }}
-          AWS_DEFAULT_REGION: ap-northeast-2
-          AWS_REGION: ap-northeast-2
-          REDROB_CDN_BUCKET: ${{ secrets.REDROB_CDN_BUCKET }}
-        run: |
-          set -euo pipefail
-          if [[ -z "${AWS_ACCESS_KEY_ID:-}" || -z "${AWS_SECRET_ACCESS_KEY:-}" || -z "${REDROB_CDN_BUCKET:-}" ]]; then
-            echo "::error::All Redrob CDN credentials and the bucket secret are required"
-            exit 1
-          fi
-          candidate_version="$(jq -er '.candidateVersion' "$CDN_PLAN_PATH")"
-          expected_prefix="recall/v$candidate_version"
-          if ! jq -e \
-            --arg prefix "$expected_prefix" \
-            --arg assets "$RELEASE_ASSETS_DIR/" \
-            '.versionPrefix == $prefix and .manifestKey == "recall/latest.json" and
-             all(.assets[]; (.key | startswith($prefix + "/")) and (.localPath | startswith($assets)))' \
-            "$CDN_PLAN_PATH" > /dev/null; then
-            echo "::error::CDN plan escaped the approved version or release-asset paths"
-            exit 1
-          fi
-
-          verify_head() {
-            local key="$1" expected_sha="$2" expected_size="$3" expected_type="$4" expected_cache="$5"
-            local head actual_sha actual_size actual_type actual_cache
-            head="$(aws s3api head-object --bucket "$REDROB_CDN_BUCKET" --key "$key")"
-            actual_sha="$(jq -r '.Metadata.sha256 // empty' <<< "$head")"
-            actual_size="$(jq -r '.ContentLength' <<< "$head")"
-            actual_type="$(jq -r '.ContentType // empty' <<< "$head")"
-            actual_cache="$(jq -r '.CacheControl // empty' <<< "$head")"
-            if [[ "$actual_sha" != "$expected_sha" || "$actual_size" != "$expected_size" ||
-                  "$actual_type" != "$expected_type" || "$actual_cache" != "$expected_cache" ]]; then
-              echo "::error::CDN object verification failed for key $key"
-              exit 1
-            fi
-          }
-
-          while IFS= read -r encoded_asset; do
-            asset="$(printf '%s' "$encoded_asset" | base64 --decode)"
-            local_path="$(jq -er '.localPath' <<< "$asset")"
-            key="$(jq -er '.key' <<< "$asset")"
-            sha256="$(jq -er '.sha256' <<< "$asset")"
-            size="$(jq -er '.size' <<< "$asset")"
-            content_type="$(jq -er '.contentType' <<< "$asset")"
-            error_file="$RUNNER_TEMP/head-object-error"
-            if existing="$(aws s3api head-object --bucket "$REDROB_CDN_BUCKET" --key "$key" 2>"$error_file")"; then
-              existing_sha="$(jq -r '.Metadata.sha256 // empty' <<< "$existing")"
-              existing_size="$(jq -r '.ContentLength' <<< "$existing")"
-              if [[ "$existing_sha" != "$sha256" || "$existing_size" != "$size" ]]; then
-                echo "::error::Immutable CDN key already exists with different content: $key"
+            case "$url" in
+              "https://github.com/${GITHUB_REPOSITORY}/releases/download/"*) ;;
+              *)
+                echo "::error::${platform} url is not a release asset of this repository: ${url}"
                 exit 1
-              fi
-              existing_path="$RUNNER_TEMP/existing-origin-object"
-              aws s3api get-object \
-                --bucket "$REDROB_CDN_BUCKET" \
-                --key "$key" \
-                "$existing_path" > /dev/null
-              if [[ "$(sha256sum "$existing_path" | cut -d' ' -f1)" != "$sha256" ]] ||
-                 [[ "$(stat -c '%s' "$existing_path")" != "$size" ]]; then
-                echo "::error::Immutable CDN key bytes do not match the approved release asset: $key"
-                exit 1
-              fi
-              rm -f "$existing_path"
-            elif grep -Eq '\(404\)|Not Found|NoSuchKey' "$error_file"; then
-              aws s3api put-object \
-                --bucket "$REDROB_CDN_BUCKET" \
-                --key "$key" \
-                --body "$local_path" \
-                --content-type "$content_type" \
-                --cache-control "public, max-age=31536000, immutable" \
-                --metadata "sha256=$sha256" \
-                --if-none-match "*" > /dev/null
-            else
-              echo "::error::Unable to determine whether immutable CDN key exists: $key"
-              cat "$error_file" >&2
-              exit 1
-            fi
-            verify_head "$key" "$sha256" "$size" "$content_type" "public, max-age=31536000, immutable"
-          done < <(jq -r '.assets[] | @base64' "$CDN_PLAN_PATH")
-
-      - name: Verify referenced public updater bytes
-        shell: bash
-        run: |
-          set -euo pipefail
-          referenced_count="$(jq '[.assets[] | select(.referenced)] | length' "$CDN_PLAN_PATH")"
-          if [[ "$referenced_count" -eq 0 ]]; then
-            echo "::error::CDN plan contains no referenced updater assets"
-            exit 1
-          fi
-          while IFS= read -r encoded_asset; do
-            asset="$(printf '%s' "$encoded_asset" | base64 --decode)"
-            url="$(jq -er '.url' <<< "$asset")"
-            expected_sha="$(jq -er '.sha256' <<< "$asset")"
-            expected_size="$(jq -er '.size' <<< "$asset")"
-            public_path="$RUNNER_TEMP/public-updater-asset"
-            verified=false
-            for attempt in $(seq 1 12); do
-              if curl --fail --silent --show-error --location \
-                --output "$public_path" \
-                "$url?promotion-asset=$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT-$attempt" &&
-                 [[ "$(sha256sum "$public_path" | cut -d' ' -f1)" == "$expected_sha" ]] &&
-                 [[ "$(stat -c '%s' "$public_path")" == "$expected_size" ]]; then
-                verified=true
-                break
-              fi
-              sleep 5
-            done
-            rm -f "$public_path"
-            if [[ "$verified" != "true" ]]; then
-              echo "::error::Referenced CDN updater bytes do not match the approved release asset: $url"
-              exit 1
-            fi
-          done < <(jq -r '.assets[] | select(.referenced) | @base64' "$CDN_PLAN_PATH")
-
-      - name: Publish stable manifest last
-        shell: bash
-        env:
-          AWS_ACCESS_KEY_ID: ${{ secrets.REDROB_CDN_ACCESS_KEY_ID }}
-          AWS_SECRET_ACCESS_KEY: ${{ secrets.REDROB_CDN_SECRET_ACCESS_KEY }}
-          AWS_DEFAULT_REGION: ap-northeast-2
-          AWS_REGION: ap-northeast-2
-          REDROB_CDN_BUCKET: ${{ secrets.REDROB_CDN_BUCKET }}
-        run: |
-          set -euo pipefail
-          manifest_key="$(jq -er '.manifestKey' "$CDN_PLAN_PATH")"
-          manifest_sha256="$(jq -er '.manifestSha256' "$CDN_PLAN_PATH")"
-          condition=()
-          case "$(jq -er '.mode' "$CDN_ORIGIN_STATE_PATH")" in
-            if-match)
-              condition=(--if-match "$(jq -er '.etag' "$CDN_ORIGIN_STATE_PATH")")
-              ;;
-            if-none-match)
-              condition=(--if-none-match "*")
-              ;;
-            *)
-              echo "::error::CDN origin state has an unsupported publication mode"
-              exit 1
-              ;;
-          esac
-          aws s3api put-object \
-            --bucket "$REDROB_CDN_BUCKET" \
-            --key "$manifest_key" \
-            --body "$CDN_MANIFEST_PATH" \
-            --content-type "application/json" \
-            --cache-control "no-store, max-age=0" \
-            --metadata "sha256=$manifest_sha256" \
-            "${condition[@]}" > /dev/null
-          published_head="$(aws s3api head-object --bucket "$REDROB_CDN_BUCKET" --key "$manifest_key")"
-          if [[ "$(jq -r '.Metadata.sha256 // empty' <<< "$published_head")" != "$manifest_sha256" ]] ||
-             [[ "$(jq -r '.ContentLength' <<< "$published_head")" != "$(stat -c '%s' "$CDN_MANIFEST_PATH")" ]] ||
-             [[ "$(jq -r '.ContentType // empty' <<< "$published_head")" != "application/json" ]] ||
-             [[ "$(jq -r '.CacheControl // empty' <<< "$published_head")" != "no-store, max-age=0" ]]; then
-            echo "::error::Published latest.json object metadata does not match the generated manifest"
-            exit 1
-          fi
-
-      - name: Verify public stable manifest
-        shell: bash
-        run: |
-          set -euo pipefail
-          public_manifest="$RUNNER_TEMP/public-latest.json"
-          local_normalized="$RUNNER_TEMP/local-normalized.json"
-          public_normalized="$RUNNER_TEMP/public-normalized.json"
-          jq -S -c . "$CDN_MANIFEST_PATH" > "$local_normalized"
-          verified=false
-          for attempt in $(seq 1 24); do
-            if curl --fail --silent --show-error --location \
-              --output "$public_manifest" \
-              "https://cdn.redrob.ai/recall/latest.json?promotion-verify=$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT-$attempt" &&
-               jq -S -c . "$public_manifest" > "$public_normalized" &&
-               cmp --silent "$local_normalized" "$public_normalized"; then
-              verified=true
-              break
-            fi
-            sleep 5
+                ;;
+            esac
           done
-          if [[ "$verified" != "true" ]]; then
-            echo "::error::Public stable manifest did not converge to the generated manifest"
-            exit 1
-          fi
-          echo "Stable updater CDN promotion verified for v$(jq -r '.candidateVersion' "$CDN_PLAN_PATH")"
+
+          echo "latest.json covers all four platforms, is signed, and points only at this repository's release assets."

@@ -4,7 +4,19 @@ import { resolve } from "node:path";
 const publicKey = process.env.TAURI_UPDATER_PUBLIC_KEY?.trim();
 if (!publicKey)
   throw new Error("TAURI_UPDATER_PUBLIC_KEY is required for a release build.");
-const endpoint = "https://cdn.redrob.ai/recall/latest.json";
+// GitHub Releases IS the update channel -- there is no CDN in front of it any more.
+//
+// `releases/latest/download/<asset>` resolves to the newest published, non-prerelease
+// release, which is what makes the draft-release QA gate work: a draft is not "latest",
+// so no installed client can see a version until a human publishes it. Tauri follows
+// the redirect to the asset itself.
+//
+// The tag workflow attaches this manifest with tauri-action's `uploadUpdaterJson`, and
+// verify-release-assets fails the build if it is missing or if any platform URL points
+// outside this repository's own release assets. Without that guard the failure is
+// silent: the app installs and simply never updates again.
+const endpoint =
+  "https://github.com/redrob-labs/redrob-recall/releases/latest/download/latest.json";
 
 const config = {
   bundle: {

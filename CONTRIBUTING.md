@@ -38,7 +38,7 @@ model — there is no `develop`, no release branch and no long-lived integration
 
 Fork the repository, push your branch to your fork, and open the pull request from there. You do not
 need write access to contribute, and pull requests from forks run CI with no repository secrets — the
-signing and CDN credentials belong to `release.yml`, which only a maintainer's tag can start.
+signing credentials belong to `release.yml`, which only a maintainer's tag can start.
 
 [redrob-code](https://github.com/redrob-labs/redrob-code) runs Git Flow with a `develop` branch.
 This one does not, so cut from `main`.
