@@ -85,7 +85,9 @@ npm ci
 npm run tauri build
 ```
 
-Tauri는 플랫폼별 번들을 `src-tauri/target/release/bundle/`에 씁니다. 프로덕션 인스톨러는 리뷰를 거친 **Signed desktop release** 워크플로만 만듭니다. 그 워크플로는 [릴리스 안내](docs/RELEASING.md)에 적힌 외부 업데이터·Apple·Windows 서명 시크릿을 요구하며, 자격 증명이 없으면 서명되지 않은 산출물을 발행하는 대신 릴리스를 중단합니다.
+Tauri는 플랫폼별 번들을 `src-tauri/target/release/bundle/`에 씁니다. 프로덕션 인스톨러는 리뷰를 거친 **Signed desktop release** 워크플로만 만듭니다. 그 워크플로는 [릴리스 안내](docs/RELEASING.md)에 적힌 외부 업데이터·Apple 서명 시크릿을 요구하며, 자격 증명이 없으면 서명되지 않은 산출물을 발행하는 대신 릴리스를 중단합니다.
+
+현재 릴리스하는 플랫폼은 **Linux x64**와 **Apple Silicon macOS**입니다. Windows x64는 코드 서명 인증서가 구성된 뒤에만 빌드·서명되며, 그때까지는 서명 없는 인스톨러를 내보내는 대신 그 레그를 의도적으로 건너뜁니다. Intel Mac은 지원하지 않습니다: 내장된 ONNX Runtime(`fastembed` 경유 `ort-sys`)이 `x86_64-apple-darwin` 바이너리를 제공하지 않습니다.
 
 발행된 빌드는 **설정 → 업데이트**에서 서명된 stable 업데이트 채널을 확인합니다. 업데이트 메타데이터와 인스톨러 서명은 설치 전에 Tauri가 검증합니다. 로컬 개발 빌드에는 의도적으로 업데이트 키와 엔드포인트를 설정하지 않습니다.
 
