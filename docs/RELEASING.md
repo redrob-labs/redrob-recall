@@ -1,10 +1,17 @@
 # Release Guide
 
-Redrob Recall releases are built as signed native installers by `.github/workflows/release.yml`. A pushed `vMAJOR.MINOR.PATCH` tag creates or updates a **draft** GitHub Release. The release assets remain draft-only while the exact signed files pass platform QA. Publishing a non-prerelease GitHub Release promotes those files to the stable updater CDN.
+Redrob Recall releases are built as signed native installers by
+`.github/workflows/release.yml`. A pushed `vMAJOR.MINOR.PATCH` tag creates or updates a
+**draft** GitHub Release. Publishing that draft is the release: GitHub Releases is the
+update channel itself, so there is no separate promotion step and no CDN.
 
-Production builds always check `https://cdn.redrob.ai/recall/latest.json`. Promotion stores artifacts at immutable `recall/vMAJOR.MINOR.PATCH/<asset-name>` keys and publishes the mutable `recall/latest.json` manifest only after every referenced artifact is publicly reachable.
+Production builds check
+`https://github.com/redrob-labs/redrob-recall/releases/latest/download/latest.json`. That
+path resolves to the newest **published, non-prerelease** release, which is what makes the
+draft gate real — a draft is not "latest", so no installed client can see a version until a
+named owner publishes it.
 
-## One-time signing and CDN setup
+## One-time signing setup
 
 Generate the Tauri updater signing key pair on a trusted, encrypted administrator machine:
 
@@ -12,44 +19,55 @@ Generate the Tauri updater signing key pair on a trusted, encrypted administrato
 npm run tauri signer generate -- -w ~/.tauri/redrob-recall.key
 ```
 
-Back up the private key and its password in the Redrob secrets manager. Losing it prevents installed copies from trusting future updates. Never put private keys, certificates, passwords, or `.env` files in this repository.
+Back up the private key and its password in the Redrob secrets manager. Losing it prevents
+installed copies from trusting future updates. Never put private keys, certificates,
+passwords, or `.env` files in this repository.
 
-Create a protected GitHub Environment named `production-release` and configure required reviewers or equivalent deployment protection. Release builds use these environment secrets:
+Create a protected GitHub Environment named `production-release` and configure required
+reviewers or equivalent deployment protection. The build job runs inside it and consumes
+these **organization** secrets and variables — they are inherited by name, and the same set
+is shared with the other Redrob desktop products:
 
-| Secret                               | Purpose                                                                        |
-| ------------------------------------ | ------------------------------------------------------------------------------ |
-| `TAURI_UPDATER_PUBLIC_KEY`           | Public updater verification key embedded into release builds                   |
-| `TAURI_SIGNING_PRIVATE_KEY`          | Private updater artifact signing key or secure key path content                |
-| `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` | Optional updater key password                                                  |
-| `APPLE_CERTIFICATE`                  | Base64-encoded Developer ID Application `.p12`                                 |
-| `APPLE_CERTIFICATE_PASSWORD`         | Password for the exported Apple certificate                                    |
-| `KEYCHAIN_PASSWORD`                  | Ephemeral CI keychain password                                                 |
-| `APPLE_ID`                           | Apple notarization account                                                     |
-| `APPLE_PASSWORD`                     | App-specific Apple password                                                    |
-| `APPLE_TEAM_ID`                      | Apple Developer team identifier                                                |
-| `WIN_CSC_LINK`                       | Windows PFX as raw Base64, a `data:*;base64,...` URI, or an HTTPS download URL |
-| `WIN_CSC_KEY_PASSWORD`               | Password for the Windows PFX                                                   |
+| Name | Kind | Purpose |
+| --- | --- | --- |
+| `TAURI_SIGNING_PUBLIC_KEY` | variable | Public updater verification key embedded into release builds |
+| `TAURI_SIGNING_PRIVATE_KEY` | secret | Private updater artifact signing key |
+| `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` | secret | Updater key password |
+| `APPLE_CODESIGN_CERT_P12_BASE64` | secret | Base64-encoded Developer ID Application `.p12` |
+| `APPLE_CODESIGN_CERT_PASSWORD` | secret | Password for the exported Apple certificate |
+| `APPLE_NOTARY_API_KEY_ID` | secret | App Store Connect API key id used for notarization |
+| `APPLE_NOTARY_API_ISSUER_ID` | secret | App Store Connect issuer id |
+| `APPLE_NOTARY_API_KEY_P8_BASE64` | secret | Base64-encoded `.p8` private key, written to the runner temp only |
+| `WIN_CSC_LINK` | secret | Windows PFX as raw Base64, a `data:*;base64,...` URI, or an HTTPS download URL |
+| `WIN_CSC_KEY_PASSWORD` | secret | Password for the Windows PFX |
 
-The Windows import rejects every other `WIN_CSC_LINK` form and requires a currently valid certificate with a private key, the Code Signing extended key usage, and a trusted non-revoked chain. After packaging, CI verifies every NSIS/MSI Authenticode signature, signer thumbprint, and timestamp before the tag workflow can succeed. Apple Developer ID signing and notarization remain required for both macOS architectures.
+Notarization uses the App Store Connect **API key**, not an Apple ID and app-specific
+password. The Windows import rejects every other `WIN_CSC_LINK` form and requires a
+currently valid certificate with a private key, the Code Signing extended key usage, and a
+trusted non-revoked chain. After packaging, CI verifies every NSIS/MSI Authenticode
+signature, signer thumbprint, and timestamp before the tag workflow can succeed. Apple
+Developer ID signing and notarization remain required for both macOS architectures.
 
-The published-release promotion job uses these existing organization secrets through the same protected environment:
+No CDN credential is involved. The CDN promotion step was removed along with the CDN
+itself; the release consumes only the signing material above plus the run's own
+`GITHUB_TOKEN`.
 
-| Secret                         | Purpose                                             |
-| ------------------------------ | --------------------------------------------------- |
-| `REDROB_CDN_ACCESS_KEY_ID`     | S3-compatible access key for the updater CDN bucket |
-| `REDROB_CDN_SECRET_ACCESS_KEY` | S3-compatible secret key                            |
-| `REDROB_CDN_BUCKET`            | Bare S3 bucket name                                 |
+The workflow verifies that release commits are reachable from `origin/main`, requires
+`npm run verify` and the pinned RustSec audit to pass, serializes matrix builds to prevent
+concurrent `latest.json` updates, and refuses missing signing configuration rather than
+publishing unsigned artifacts. Release configuration is generated only inside the runner as
+`src-tauri/tauri.release.conf.json`, which is ignored by Git.
 
-The CDN credentials are available only to the promotion's S3 object-access steps, use region `ap-northeast-2`, and must be scoped to the `recall/` distribution path where possible. The asset-validation script runs in a separate credential-free step. Public access is supplied by the bucket/CDN policy; the workflow never sets a `public-read` object ACL.
+Tauri requires signed updater artifacts and describes the key model in its
+[official updater guide](https://v2.tauri.app/plugin/updater/). Apple certificate and
+notarization setup is covered by the
+[Tauri macOS signing guide](https://v2.tauri.app/distribute/sign/macos/).
 
-The workflow verifies that release commits are reachable from `origin/main`, requires `npm run verify` and the pinned RustSec audit to pass, serializes matrix builds to prevent concurrent `latest.json` updates, and refuses missing signing or CDN configuration. Promotion also requires a successful tag-triggered release workflow for the exact tag commit and downloads every snapshotted asset by GitHub asset ID. Release configuration is generated only inside the runner as `src-tauri/tauri.release.conf.json`, which is ignored by Git.
-
-Tauri requires signed updater artifacts and describes the key model in its [official updater guide](https://v2.tauri.app/plugin/updater/). Apple certificate and notarization setup is covered by the [Tauri macOS signing guide](https://v2.tauri.app/distribute/sign/macos/).
-
-## Prepare and promote a release
+## Cut a release
 
 1. Update `CHANGELOG.md`.
-2. Set the same semantic version in `package.json`, `src-tauri/Cargo.toml`, and `src-tauri/tauri.conf.json`.
+2. Set the same semantic version in `package.json`, `src-tauri/Cargo.toml`, and
+   `src-tauri/tauri.conf.json`.
 3. Run:
 
    ```bash
@@ -65,33 +83,50 @@ Tauri requires signed updater artifacts and describes the key model in its [offi
    git push origin v0.1.0
    ```
 
-6. Watch **Signed desktop release**. The push jobs build Linux x64, macOS Intel, macOS Apple Silicon, and Windows x64 installers, sign updater bundles, and upload all files plus `latest.json` to a draft GitHub Release.
-7. Keep the GitHub Release as a draft. Download those exact assets and complete `docs/QA_CHECKLIST.md` on clean machines. Draft assets must not change the stable CDN manifest.
-8. Confirm native signatures, updater signatures, checksums, release notes, and QA evidence. A named release owner may then publish the non-prerelease GitHub Release.
-9. The `release.published` event starts the protected `publish-cdn` job. It validates the tag, `main` ancestry, and successful tag workflow, then downloads every snapshotted asset by its GitHub asset ID. GitHub's uploaded state, SHA-256 digest, local size, platform bundle type, duplicate/unsafe names, and updater metadata are all checked before promotion.
-10. Promotion reads the current manifest directly from the S3 origin, requires the candidate to be newer, uploads every non-manifest asset first, and never overwrites a versioned key with different bytes. Existing objects are accepted only when their origin bytes, SHA-256 metadata, size, content type, and cache policy match.
-11. The job downloads every referenced updater payload from the public CDN and checks its size and SHA-256 before conditionally uploading `recall/latest.json` last against the origin state it validated. It then polls the public manifest with cache-busting URLs until it matches the generated manifest semantically.
+6. Watch **Signed desktop release**. It builds Linux x64, macOS Intel, macOS Apple Silicon,
+   and Windows x64 installers, signs the updater bundles, and uploads every file plus
+   `latest.json` to a **draft** GitHub Release.
+7. The `verify-release-assets` job then fails the run unless the draft carries
+   `latest.json`, an AppImage, a `.deb`, a `.dmg`, an `.exe`, and an `.msi`; unless the
+   manifest version matches the tag; and unless all four platform entries are signed and
+   point at this repository's own release assets. A manifest whose URLs point anywhere else
+   is the silent-freeze failure this job exists to catch.
+8. Keep the release a draft. Download those exact assets and complete
+   `docs/QA_CHECKLIST.md` on clean machines. Draft assets are not reachable through
+   `releases/latest/download/...`, so no installed client sees them.
+9. Confirm native signatures, updater signatures, checksums, release notes, and QA
+   evidence. A named release owner then publishes the non-prerelease GitHub Release, and
+   that publication is what makes the version live.
 
-Only stable numeric versions are promotable. Drafts and prereleases are never sent to the normal client channel. The generated manifest retains Tauri signatures but replaces private GitHub asset URLs with `https://cdn.redrob.ai/recall/v<version>/<URL-encoded-name>` URLs. Promotion does not receive or use the updater private signing key.
+## Acceptance after publishing
 
-## CDN caching and acceptance
+- `https://github.com/redrob-labs/redrob-recall/releases/latest/download/latest.json`
+  returns the approved version and all four platform keys.
+- Every platform URL is anonymously reachable with GET and returns the exact approved size
+  and SHA-256 bytes — the same bytes QA downloaded from the draft.
+- A previous production build detects, verifies, installs, and relaunches into the new
+  version on every platform.
 
-Versioned assets use `Cache-Control: public, max-age=31536000, immutable`. The stable `latest.json` uses `Cache-Control: no-store, max-age=0` and `application/json`. Every uploaded object carries SHA-256 metadata and is verified with `head-object`; reused origin objects and every referenced public updater URL are downloaded and hashed before stable metadata changes.
-
-After promotion, confirm:
-
-- `https://cdn.redrob.ai/recall/latest.json` returns the approved version and all four required platform keys;
-- every platform URL uses the versioned Redrob CDN prefix and is anonymously reachable;
-- downloaded updater bytes and signatures are the approved draft-release bytes;
-- immutable assets have the long-lived cache policy and `latest.json` has the no-store policy; and
-- a previous production build detects, verifies, installs, and relaunches into the promoted version on every platform.
+Assets are immutable by construction: GitHub does not let a published release asset be
+replaced with different bytes under the same name, so there is no cache policy to configure
+and no versioned-key contract to enforce.
 
 ## Rollback and key rotation
 
-Never replace a bad release or any versioned CDN object under the same version. A failed promotion before `latest.json` publication is safe to retry only when all existing immutable objects match exactly. If a bad version reached stable clients, fix the issue, increment the patch version, repeat draft QA, and publish the newer signed release. Tauri rejects downgrades by default, so pointing `latest.json` at an older version is not a supported rollback.
+Never replace a bad release under the same version. If a bad version reached clients, fix
+the issue, increment the patch version, repeat draft QA, and publish the newer signed
+release. Tauri rejects downgrades by default, so pointing the channel at an older release is
+not a supported rollback — unpublishing the bad release (returning it to draft) is what
+removes it from `latest`.
 
-Updater key rotation requires a transition release trusted by the existing key. Treat suspected key compromise as a security incident and follow `SECURITY.md` before shipping anything else.
+Updater key rotation requires a transition release trusted by the existing key. Treat
+suspected key compromise as a security incident and follow `SECURITY.md` before shipping
+anything else.
 
 ## Reproducibility and provenance
 
-CI installs JavaScript dependencies with `npm ci`, Rust dependencies with `--locked`, and pins every third-party GitHub Action to a full commit SHA. Native signatures and notarization timestamps intentionally make installer bytes non-reproducible. Source revision, workflow run, version tag, GitHub Release ID, promoted object hashes, and uploaded installer signatures form the release audit trail.
+CI installs JavaScript dependencies with `npm ci`, Rust dependencies with `--locked`, and
+pins every third-party GitHub Action to a full commit SHA. Native signatures and
+notarization timestamps intentionally make installer bytes non-reproducible. Source
+revision, workflow run, version tag, GitHub Release ID, and uploaded installer signatures
+form the release audit trail.
