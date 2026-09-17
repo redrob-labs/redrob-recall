@@ -1,5 +1,7 @@
 # Contributing
 
+**English** · [한국어](./CONTRIBUTING.ko.md)
+
 Thanks for helping. This is the working agreement for the repository: how branches are named, what has
 to be green before a merge, and the promise the product makes that a change must not quietly break.
 
@@ -20,34 +22,57 @@ That sentence is on the README and in the product, so treat it as a contract:
 
 ## Branch model
 
-One long-lived branch, `main`. Short-lived branches off it, merged by pull request. That is the whole
-model — there is no `develop`, no release branch and no long-lived integration branch to keep in sync.
+Two long-lived branches. `develop` is where work lands; `main` is what has been released.
 
-- **`main`** is the trunk. A GitHub ruleset enforces it rather than trusting this document:
-  - no direct pushes — every change arrives as a pull request;
-  - no force pushes and no deletion of the branch;
-  - linear history, so `main` reads as a list of changes rather than a graph;
-  - required status checks must pass — they do not have to pass against the newest
-    `main`, so a queue of bot updates does not have to rebase and re-run one at a time;
-  - review threads must be resolved before merge.
-- **Working branches** are `<type>/<short-slug>`, e.g. `fix/index-watcher-restart`,
-  `feat/hwp-extraction`. Types: `feat`, `fix`, `chore`, `docs`, `test`, `refactor`, `perf`.
-- **Merging is squash-only**, and the branch is deleted on merge. One pull request becomes one commit
-  on `main`, so `git log main` is the changelog. The squash commit's body is the pull request body,
-  not a concatenation of your work-in-progress messages.
-- Release tags are cut from `main`, formatted `v<major>.<minor>.<patch>`.
+- **`develop`** is the default branch and the integration branch. Cut working branches from it and
+  open pull requests back into it. Clone the repository and you are on `develop`.
+- **`main`** is the released state. It takes pull requests only from `release/*` and `hotfix/*`
+  branches, and release tags are cut from it. Nothing else merges here.
+- **Working branches** are `<type>/<short-slug>` off `develop`, e.g. `fix/index-restart`, `feat/pdf-extract`. Types: `feat`,
+  `fix`, `chore`, `docs`, `test`, `refactor`, `perf`.
+- **Merging is squash-only**, and the branch is deleted on merge. One pull request becomes one
+  commit, so `git log develop` reads as a list of changes rather than a graph. The squash commit's
+  body is the pull request body, not a concatenation of your work-in-progress messages.
+
+Both branches are enforced by GitHub rulesets rather than by this document:
+
+- no direct pushes — every change arrives as a pull request;
+- no force pushes and no deletion of the branch;
+- linear history;
+- required status checks must pass — they do not have to pass against the newest tip, so a queue of
+  bot updates does not have to rebase and re-run one at a time;
+- review threads must be resolved before merge.
+
+A ruleset cannot express *which* branch a pull request comes from, so "only `release/*` and
+`hotfix/*` merge into `main`" is a convention this document carries and reviewers uphold. One part
+of it is machine-checked: the release workflow refuses to build a tag whose commit is not reachable
+from `origin/main`, so tagging straight off `develop` fails instead of shipping.
+
+### Releasing
+
+```bash
+git switch develop && git pull
+git switch -c release/v0.2.0
+# bump the version, update the changelog, run the release check
+# open a pull request into main and merge it, then tag main:
+git switch main && git pull
+git tag -a v0.2.0 -m "Redrob Recall v0.2.0"
+git push origin v0.2.0
+# bring main's release commit back so develop does not fall behind:
+git switch -c chore/sync-main-to-develop main
+# open a pull request into develop
+```
+
+A hotfix is the same shape with `hotfix/*` cut from `main` rather than `develop`, and it merges into
+both.
 
 Fork the repository, push your branch to your fork, and open the pull request from there. You do not
-need write access to contribute, and pull requests from forks run CI with no repository secrets — the
-signing credentials belong to `release.yml`, which only a maintainer's tag can start.
-
-[redrob-code](https://github.com/redrob-labs/redrob-code) runs Git Flow with a `develop` branch.
-This one does not, so cut from `main`.
+need write access to contribute, and pull requests from forks run CI with no repository secrets.
 
 ## Day to day
 
 ```bash
-git switch main && git pull
+git switch develop && git pull
 git switch -c fix/short-description
 
 npm install
@@ -58,7 +83,7 @@ cargo fmt --all
 cargo clippy --all-targets -- -D warnings
 cargo test --workspace
 
-# open a pull request into main
+# open a pull request into develop
 ```
 
 A change to extraction should come with a file that exercises it. The formats this reads (PDF, DOCX,
@@ -81,11 +106,12 @@ a fork gets the same run as one from a branch here:
 | **Rust security advisories** | `cargo audit` against the locked dependency set |
 
 The advisory scan reads a database that changes daily, so it can go red on a branch that changed no
-dependencies; check the same job on `main` before assuming it is yours. When it is a real finding,
+dependencies; check the same job on `develop` before assuming it is yours. When it is a real finding,
 bump the crate rather than allowing the advisory.
 
 **`release.yml`** builds and publishes on a tag. It is maintainer-only by construction: it fires on
-`push: tags` and `release: published`, verifies the tag commit is an ancestor of `main`, and puts the
-credentialed jobs behind the `production-release` environment.
+`push: tags`, verifies the tag commit is an ancestor of `main`, and puts the credentialed jobs behind
+the `production-release` environment. That ancestor check is what makes the branch model real — a tag
+cut from `develop` is refused rather than shipped.
 
 Run `npm run check` and `cargo test --workspace` before pushing.
