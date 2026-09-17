@@ -1,8 +1,8 @@
 # Redrob VectorDB
 
-**Everything on your computer, searchable.**
+Redrob VectorDB is a local-first desktop app for searching folders and asking grounded questions about your files. Files, extracted text, embeddings, and the complete search index stay on the device. Search is free and local. When you use **Ask**, only your question and the few relevant text excerpts are sent to the existing Redrob API; filenames, paths, complete files, and the full index are not sent.
 
-Redrob VectorDB is a local-first desktop app for finding information across folders and asking grounded questions about your files. Files, extracted text, embeddings, and the complete search index stay on the device. Search is free and local. When you use **Ask**, only your question and the few relevant text excerpts are sent to the existing Redrob API; filenames, paths, complete files, and the full index are not sent.
+**Everything on your computer, searchable.**
 
 ## What it does
 
@@ -28,10 +28,10 @@ Redrob VectorDB is a local-first desktop app for finding information across fold
 
 Application data is stored in `~/.redrob/vectordb`:
 
-- `metadata.db` — document metadata, extracted passages, and FTS data
-- `qdrant-edge/` — local semantic index
-- `models/` — downloaded local embedding model
-- `local-api-token` — generated local API bearer token (`0600` on Unix)
+- `metadata.db`: document metadata, extracted passages, and FTS data
+- `qdrant-edge/`: local semantic index
+- `models/`: downloaded local embedding model
+- `local-api-token`: generated local API bearer token (`0600` on Unix)
 
 Original files are never copied into this directory. Consistent metadata backups are retained under `~/.redrob/vectordb/backups`; see [Backup and recovery](docs/RECOVERY.md).
 
