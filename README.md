@@ -1,5 +1,7 @@
 # Redrob Recall
 
+**English** · [한국어](./README.ko.md)
+
 Redrob Recall is a local-first desktop app for searching folders and asking grounded questions about your files. Files, extracted text, embeddings, and the complete search index stay on the device. Search is free and local. When you use **Ask**, only your question and the few relevant text excerpts are sent to the existing Redrob API; filenames, paths, complete files, and the full index are not sent.
 
 **Everything on your computer, searchable.**

@@ -2,7 +2,7 @@
 name = "redrob-recall"
 version = "0.1.0"
 description = "Private, local-first semantic search for everything on your computer"
-authors = ["Redrob"]
+authors = ["Janghoon Lee (Redrob) and contributors"]
 edition = "2021"
 rust-version = "1.95"
 license = "Apache-2.0"
