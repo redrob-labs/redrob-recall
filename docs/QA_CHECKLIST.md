@@ -4,14 +4,17 @@ Complete this checklist against the exact signed draft-release artifacts. The Gi
 
 ## Install and lifecycle
 
-- [ ] Windows x64 NSIS installs per-user, starts, restarts, upgrades, and uninstalls cleanly.
-- [ ] Windows x64 MSI installs, upgrades, and uninstalls cleanly.
-- [ ] macOS Intel DMG opens, passes Gatekeeper, installs, launches, and is notarized.
+Two platforms are not built today, so their items are marked as such rather than deleted —
+deleting them loses the requirement when the platform comes back. Skip an item only when the
+tag run's `Resolve the release matrix` step reports that platform as not built.
+
+- [ ] *(Windows only, requires `WINDOWS_SIGNING_READY`)* Windows x64 NSIS installs per-user, starts, restarts, upgrades, and uninstalls cleanly.
+- [ ] *(Windows only, requires `WINDOWS_SIGNING_READY`)* Windows x64 MSI installs, upgrades, and uninstalls cleanly.
 - [ ] macOS Apple Silicon DMG opens, passes Gatekeeper, installs, launches, and is notarized.
 - [ ] Linux x64 AppImage launches on the oldest supported distribution.
 - [ ] Linux x64 DEB installs with dependencies and removes cleanly.
 - [ ] A second launch focuses the existing window.
-- [ ] Windows NSIS/MSI installers have a valid Authenticode chain, the expected imported signer thumbprint, and a timestamp; no unsigned-code or unknown-publisher warning appears.
+- [ ] *(Windows only, requires `WINDOWS_SIGNING_READY`)* Windows NSIS/MSI installers have a valid Authenticode chain, the expected imported signer thumbprint, and a timestamp; no unsigned-code or unknown-publisher warning appears.
 
 ## Local library
 
@@ -64,8 +67,8 @@ Complete this checklist against the exact signed draft-release artifacts. The Gi
 - [ ] Backup/migration behavior is verified across the update.
 - [ ] `https://github.com/redrob-labs/redrob-recall/releases/latest/download/latest.json` still returns the PREVIOUS version while this release is a draft — a draft is not `latest`, and this is the whole draft gate.
 - [ ] The approved release is a non-prerelease numeric `vMAJOR.MINOR.PATCH` tag whose commit is reachable from `origin/main`.
-- [ ] The `verify-release-assets` job passed on the tag run: `latest.json` attached, version matching the tag, an AppImage, `.deb`, `.dmg`, `.exe` and `.msi` present.
-- [ ] `latest.json` contains signed entries for `linux-x86_64`, `darwin-aarch64`, `darwin-x86_64`, and `windows-x86_64`; Windows selects the signed NSIS updater payload.
+- [ ] The `verify-release-assets` job passed on the tag run: `latest.json` attached, version matching the tag, and an installer present for every platform the run actually built (the job prints the list it required).
+- [ ] `latest.json` contains a signed entry for every built platform — `linux-x86_64` and `darwin-aarch64` today, plus `windows-x86_64` once `WINDOWS_SIGNING_READY` is set, in which case Windows selects the signed NSIS updater payload.
 - [ ] Every platform URL begins with `https://github.com/redrob-labs/redrob-recall/releases/download/`, is anonymously reachable with GET after publishing, and returns the exact approved size and SHA-256 bytes.
 - [ ] The bytes a client downloads after publishing are the same bytes QA downloaded from the draft — GitHub does not allow a published asset to be replaced under the same name, so verify the digests rather than assuming.
 - [ ] A modified artifact and an invalid signature are still rejected by the installed client.

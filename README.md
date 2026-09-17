@@ -85,7 +85,9 @@ npm ci
 npm run tauri build
 ```
 
-Tauri writes platform bundles under `src-tauri/target/release/bundle/`. Production installers are created only by the reviewed **Signed desktop release** workflow. It requires the external updater, Apple, and Windows signing secrets documented in [the release guide](docs/RELEASING.md); missing credentials stop the release instead of publishing unsigned artifacts.
+Tauri writes platform bundles under `src-tauri/target/release/bundle/`. Production installers are created only by the reviewed **Signed desktop release** workflow. It requires the external updater and Apple signing secrets documented in [the release guide](docs/RELEASING.md); missing credentials stop the release instead of publishing unsigned artifacts.
+
+Released platforms today are **Linux x64** and **macOS on Apple Silicon**. Windows x64 is built and signed only once a code-signing certificate is configured — until then that leg is skipped deliberately rather than shipping an unsigned installer. Intel Macs are not supported: the embedded ONNX Runtime (`ort-sys`, via `fastembed`) publishes no binary for `x86_64-apple-darwin`.
 
 Published builds check the signed stable update channel from **Settings → Updates**. Update metadata and installer signatures are verified by Tauri before installation. Local development builds intentionally have no update key or endpoint configured.
 

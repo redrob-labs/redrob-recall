@@ -89,3 +89,38 @@ if (iconProblems.length > 0) {
 console.log(
   `Bundle icons are usable: ${squarePngCount} square RGBA PNG(s) in bundle.icon.`,
 );
+
+// A lockfile that DECLARES an optional platform dependency but carries no package block for it
+// installs correctly only on the platform it was generated on: `npm ci` skips an optional
+// dependency it has no entry for, without a word, and the build then dies much later at the
+// point the missing native binary is needed. The sibling product shipped exactly that state --
+// one of eleven Tauri CLI platform blocks, and no esbuild or rollup blocks at all -- so its
+// macOS legs could never have worked. This lockfile is currently complete; the check exists
+// because Dependabot rewrites this file constantly, which is when it would regress.
+const lockPackages =
+  JSON.parse(
+    await readFile(new URL("../package-lock.json", import.meta.url), "utf8"),
+  ).packages ?? {};
+const missingPlatformBlocks = [];
+for (const [key, meta] of Object.entries(lockPackages)) {
+  for (const dependency of Object.keys(meta.optionalDependencies ?? {})) {
+    if (`node_modules/${dependency}` in lockPackages) continue;
+    missingPlatformBlocks.push(
+      `${dependency} (declared by ${key === "" ? "the root package" : key})`,
+    );
+  }
+}
+// fsevents is the one legitimate absence: a macOS-only file WATCHER for dev mode, declared as
+// a version range rather than pinned, and no production bundle step needs it.
+const unexplainedMissing = missingPlatformBlocks.filter(
+  (entry) => !entry.startsWith("fsevents "),
+);
+if (unexplainedMissing.length > 0) {
+  throw new Error(
+    "package-lock.json declares optional platform dependencies with no package block, so " +
+      `npm ci cannot install them off this platform:\n- ${unexplainedMissing.join("\n- ")}`,
+  );
+}
+console.log(
+  "Lockfile carries a package block for every declared optional platform dependency.",
+);

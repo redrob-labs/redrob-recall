@@ -46,7 +46,18 @@ password. The Windows import rejects every other `WIN_CSC_LINK` form and require
 currently valid certificate with a private key, the Code Signing extended key usage, and a
 trusted non-revoked chain. After packaging, CI verifies every NSIS/MSI Authenticode
 signature, signer thumbprint, and timestamp before the tag workflow can succeed. Apple
-Developer ID signing and notarization remain required for both macOS architectures.
+Developer ID signing and notarization remain required for macOS.
+
+Windows is only built when the repository variable `WINDOWS_SIGNING_READY` is `"true"`. Until
+then the leg is skipped with a notice in the run log rather than failing every tag, and no
+unsigned Windows installer is produced — the omission is deliberate and visible, not a silent
+downgrade. Setting that variable, once `WIN_CSC_LINK` holds a usable certificate, is the whole
+re-enable step.
+
+macOS Intel is not built at all. `ort-sys`, reached through `fastembed`, publishes no prebuilt
+ONNX Runtime for `x86_64-apple-darwin`, so the leg fails after compiling the entire dependency
+tree. Restoring it would mean building and vendoring `libonnxruntime` for a platform Apple no
+longer sells.
 
 No CDN credential is involved. The CDN promotion step was removed along with the CDN
 itself; the release consumes only the signing material above plus the run's own
@@ -83,14 +94,16 @@ notarization setup is covered by the
    git push origin v0.1.0
    ```
 
-6. Watch **Signed desktop release**. It builds Linux x64, macOS Intel, macOS Apple Silicon,
-   and Windows x64 installers, signs the updater bundles, and uploads every file plus
+6. Watch **Signed desktop release**. Its `Resolve the release matrix` step prints exactly which
+   platforms this run builds — Linux x64 and macOS Apple Silicon today, plus Windows x64 when
+   `WINDOWS_SIGNING_READY` is set. It signs the updater bundles and uploads every file plus
    `latest.json` to a **draft** GitHub Release.
-7. The `verify-release-assets` job then fails the run unless the draft carries
-   `latest.json`, an AppImage, a `.deb`, a `.dmg`, an `.exe`, and an `.msi`; unless the
-   manifest version matches the tag; and unless all four platform entries are signed and
-   point at this repository's own release assets. A manifest whose URLs point anywhere else
-   is the silent-freeze failure this job exists to catch.
+7. The `verify-release-assets` job then fails the run unless the draft carries `latest.json`,
+   an installer for every platform that was built, and a manifest whose version matches the tag
+   and whose every platform entry is signed and points at this repository's own release assets.
+   A manifest whose URLs point anywhere else is the silent-freeze failure this job exists to
+   catch. It also rewrites those URLs from the REST asset form `tauri-action` must use on a
+   draft into the published `releases/download/<tag>/<name>` form clients will actually fetch.
 8. Keep the release a draft. Download those exact assets and complete
    `docs/QA_CHECKLIST.md` on clean machines. Draft assets are not reachable through
    `releases/latest/download/...`, so no installed client sees them.
@@ -101,7 +114,7 @@ notarization setup is covered by the
 ## Acceptance after publishing
 
 - `https://github.com/redrob-labs/redrob-recall/releases/latest/download/latest.json`
-  returns the approved version and all four platform keys.
+  returns the approved version and a signed key for every platform the run built.
 - Every platform URL is anonymously reachable with GET and returns the exact approved size
   and SHA-256 bytes — the same bytes QA downloaded from the draft.
 - A previous production build detects, verifies, installs, and relaunches into the new
