@@ -34,6 +34,47 @@ pub fn search(state: &AppState, request: SearchRequest) -> Result<Vec<SearchResu
         }
     }
 
+    // A third arm: documents whose NAME or PATH matched. Represented by each document's first chunk,
+    // because a name match carries no in-chunk evidence to point at -- and returning every chunk of a
+    // matching document would bury the other arms under forty copies of one result.
+    //
+    // Fused with the same reciprocal rank as the others rather than given its own weighting. A filename
+    // match is strong evidence about relevance and weak evidence about which passage answers the
+    // question, and RRF already expresses that: it contributes one good rank, not a high score.
+    let documents = state
+        .storage()
+        .document_search(query, candidate_limit)
+        .unwrap_or_else(|error| {
+            tracing::warn!(%error, "document name search unavailable; using the other arms");
+            Vec::new()
+        });
+    if !documents.is_empty() {
+        let ids: Vec<i64> = documents.iter().map(|hit| hit.document_id).collect();
+        let first_chunks = state
+            .storage()
+            .first_chunks_of(&ids)
+            .unwrap_or_else(|error| {
+                tracing::warn!(%error, "could not resolve documents to chunks");
+                Vec::new()
+            });
+        let by_document: HashMap<i64, u64> = first_chunks.into_iter().collect();
+        for (rank, hit) in documents.iter().enumerate() {
+            let Some(chunk_id) = by_document.get(&hit.document_id) else {
+                // A document with no chunks yet -- indexed but not chunked, or emptied. Skipped rather
+                // than surfaced as a result with nothing to show.
+                continue;
+            };
+            let score = fused.entry(*chunk_id).or_default();
+            score.combined += 1.0 / (60.0 + rank as f32 + 1.0);
+            score.document_name = hit.score;
+            // Only when the other arms found nothing to quote: a passage containing the search term is
+            // more useful to read than the filename that also contains it.
+            if score.snippet.is_none() && !hit.snippet.is_empty() {
+                score.snippet = Some(hit.snippet.clone());
+            }
+        }
+    }
+
     let mut ranked = fused.into_iter().collect::<Vec<_>>();
     ranked.sort_by(|left, right| right.1.combined.total_cmp(&left.1.combined));
     let mut output = Vec::with_capacity(limit);
@@ -68,6 +109,7 @@ pub fn search(state: &AppState, request: SearchRequest) -> Result<Vec<SearchResu
             score: fusion.combined,
             vector_score: fusion.vector,
             keyword_score: fusion.keyword,
+            document_name_score: fusion.document_name,
             modified_at: chunk.modified_at,
         });
         if output.len() >= limit {
@@ -121,6 +163,8 @@ struct FusionScore {
     combined: f32,
     vector: f32,
     keyword: f32,
+    /// How well this chunk's DOCUMENT matched by name or path, 0 when it did not.
+    document_name: f32,
     /// The window FTS5 chose around the match, when the keyword half found this chunk.
     ///
     /// Absent for a vector-only hit, which has no single matching term to centre on -- the result falls

@@ -221,6 +221,13 @@ pub struct SearchResult {
     pub score: f32,
     pub vector_score: f32,
     pub keyword_score: f32,
+    /// How well this chunk's document matched by name or path. Zero when it did not.
+    ///
+    /// Reported separately from `keyword_score` because they answer different questions: one says the
+    /// passage contains the terms, the other says the FILE is named for them. A result surfacing only
+    /// because of its filename should be distinguishable from one whose text matched.
+    #[serde(default)]
+    pub document_name_score: f32,
     pub modified_at: String,
 }
 

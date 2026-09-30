@@ -65,6 +65,8 @@ export interface SearchResult {
   score: number;
   vectorScore: number;
   keywordScore: number;
+  /** How well the document's name or path matched. Zero when only its text did. */
+  documentNameScore?: number;
   modifiedAt: string;
 }
 

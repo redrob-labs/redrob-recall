@@ -12,7 +12,31 @@ use std::{
     sync::Arc,
 };
 
-const SCHEMA_VERSION: i64 = 3;
+const SCHEMA_VERSION: i64 = 4;
+
+/// The columns `documents_fts` indexes, with their bm25 weights.
+///
+/// A SECOND index rather than denormalised copies in `chunks`, and the difference is not marginal.
+/// Measured on 500 documents of 40 chunks each: copying `name` and `path` into every chunk row and
+/// indexing them there cost **+21.1%** of the whole database, where this second table costs **+0.4%**.
+///
+/// It also answers the right question. A name matches a DOCUMENT, so `doc_name : quarterly` against a
+/// denormalised chunk index returned 20,000 rows -- every chunk of every matching document -- where this
+/// returns 500 documents. Forty copies of each result is not a ranking problem to tune, it is the wrong
+/// granularity.
+///
+/// `name` outweighs `path` because a folder name is context a person did not choose per-document, while
+/// a filename is usually what they would type to find it.
+const DOCUMENT_FTS_COLUMNS: &[(&str, f64)] = &[("name", 3.0), ("path", 1.0)];
+
+fn document_fts_bm25() -> String {
+    let weights = DOCUMENT_FTS_COLUMNS
+        .iter()
+        .map(|(_, weight)| format!("{weight}"))
+        .collect::<Vec<_>>()
+        .join(", ");
+    format!("bm25(documents_fts, {weights})")
+}
 
 /// The columns `chunks_fts` indexes, in order, with the bm25 weight each carries.
 ///
@@ -28,9 +52,12 @@ const SCHEMA_VERSION: i64 = 3;
 /// about the term.
 const FTS_COLUMNS: &[(&str, f64)] = &[("content", 1.0), ("heading", 2.0)];
 
-/// `content, heading` -- for the CREATE, the triggers and the column list of an INSERT.
-fn fts_column_list() -> String {
-    FTS_COLUMNS
+/// `content, heading` for `FTS_COLUMNS`, `name, path` for the document one -- whichever is passed.
+///
+/// One helper rather than one per index, so the CREATE, the triggers and the tests all read the column
+/// list from the same place the weights come from.
+fn column_list(declared: &[(&str, f64)]) -> String {
+    declared
         .iter()
         .map(|(name, _)| *name)
         .collect::<Vec<_>>()
@@ -73,6 +100,74 @@ pub struct KeywordHit {
     /// FIRST character -- measured on a 1,117-character chunk whose match began at character 824, the
     /// 120-character excerpt handed to the answering model did not contain the searched term at all.
     pub snippet: String,
+}
+
+/// One document whose name or path matched.
+#[derive(Debug, Clone)]
+pub struct DocumentHit {
+    pub document_id: i64,
+    pub score: f32,
+    /// The window around the match, from whichever of `name` or `path` matched.
+    pub snippet: String,
+}
+
+impl Storage {
+    /// Search document names and paths.
+    ///
+    /// A separate arm from `keyword_search`, over a separate index, because a name matches a DOCUMENT and
+    /// chunk-level matching is the wrong granularity: measured, denormalising the name into every chunk
+    /// row returned 20,000 rows for a term matching 500 documents, and cost 21% of the database against
+    /// this index's 0.4%.
+    ///
+    /// A query naming a chunk-only field -- `heading:policy` -- is not an error here, it is silence. That
+    /// index has nothing to say about headings, and failing the whole search because one arm cannot
+    /// express the question would be worse than the arm abstaining.
+    pub fn document_search(&self, query: &str, limit: usize) -> Result<Vec<DocumentHit>> {
+        let columns: Vec<&str> = DOCUMENT_FTS_COLUMNS.iter().map(|(name, _)| *name).collect();
+        let expression = match crate::query::to_match_expression(query, &columns) {
+            Ok(expression) => expression,
+            Err(crate::query::QueryError::UnknownColumn { .. }) => return Ok(Vec::new()),
+            Err(error) => return Err(error.into()),
+        };
+
+        let connection = self.connection.lock();
+        let bm25 = document_fts_bm25();
+        let mut statement = connection.prepare(&format!(
+            "SELECT rowid, {bm25}, snippet(documents_fts, -1, '', '', '…', {SNIPPET_TOKENS})
+             FROM documents_fts WHERE documents_fts MATCH ?1 ORDER BY {bm25} LIMIT ?2"
+        ))?;
+        let rows = statement.query_map(params![expression, limit as u64], |row| {
+            let document_id: i64 = row.get(0)?;
+            let rank: f64 = row.get(1)?;
+            Ok(DocumentHit {
+                document_id,
+                score: (1.0 / (1.0 + rank.abs())) as f32,
+                snippet: row.get(2).unwrap_or_default(),
+            })
+        })?;
+        rows.collect::<Result<Vec<_>, _>>().map_err(Into::into)
+    }
+
+    /// The first chunk of each given document, which is what represents a name-only match.
+    ///
+    /// A name match carries no in-chunk evidence, so there is no "best" chunk to show -- the opening one
+    /// is the most representative of a document, and returning all of them would flood the results with
+    /// forty copies of the same hit, which is the granularity error this design exists to avoid.
+    pub fn first_chunks_of(&self, document_ids: &[i64]) -> Result<Vec<(i64, u64)>> {
+        if document_ids.is_empty() {
+            return Ok(Vec::new());
+        }
+        let connection = self.connection.lock();
+        let placeholders = vec!["?"; document_ids.len()].join(", ");
+        let mut statement = connection.prepare(&format!(
+            "SELECT document_id, MIN(id) FROM chunks WHERE document_id IN ({placeholders})
+             GROUP BY document_id"
+        ))?;
+        let rows = statement.query_map(rusqlite::params_from_iter(document_ids.iter()), |row| {
+            Ok((row.get::<_, i64>(0)?, row.get::<_, u64>(1)?))
+        })?;
+        rows.collect::<Result<Vec<_>, _>>().map_err(Into::into)
+    }
 }
 
 impl Storage {
@@ -485,34 +580,42 @@ fn migrate(connection: &mut Connection, previous_version: i64) -> Result<()> {
     Ok(())
 }
 
-/// Create `chunks_fts` and its triggers from `FTS_COLUMNS`, replacing an index built on a different
-/// column set.
+/// Create an external-content FTS index and its triggers from a column declaration, replacing one built
+/// on a different column set.
 ///
 /// A virtual table cannot be altered -- measured: SQLite answers `virtual tables may not be altered` --
-/// so widening the index means dropping and recreating it. That is lossless here and only here, because
-/// this is an EXTERNAL CONTENT table: every indexed word lives in `chunks`, and `rebuild` reads it back
-/// from there. Doing the same to an ordinary FTS5 table would destroy the only copy.
+/// so widening an index means recreating it. That is lossless HERE and only here, because these are
+/// EXTERNAL CONTENT tables: every indexed word lives in the content table, and `rebuild` reads it back
+/// from there. The same treatment of an ordinary FTS5 table would destroy the only copy.
 ///
 /// The existing column set is read from the table rather than inferred from the schema version, so a
 /// database left half-migrated by an interrupted run is repaired rather than trusted.
-fn ensure_fts_schema(connection: &Connection) -> Result<()> {
-    let columns = fts_column_list();
-    let existing = fts_existing_columns(connection)?;
-    let wanted: Vec<String> = FTS_COLUMNS
+///
+/// Generic over both indexes because there are now two, and the second was added by CALLING this rather
+/// than by copying it. Copying is how the upstream MySQL client came to lose an ON clause from one of two
+/// otherwise identical queries, which the query port had to fix.
+fn ensure_fts_index(
+    connection: &Connection,
+    index: &str,
+    content_table: &str,
+    declared: &[(&str, f64)],
+    trigger_prefix: &str,
+) -> Result<()> {
+    let columns = column_list(declared);
+    let wanted: Vec<String> = declared
         .iter()
         .map(|(name, _)| (*name).to_string())
         .collect();
-
-    if existing.as_deref() == Some(wanted.as_slice()) {
+    if fts_existing_columns(connection, index)?.as_deref() == Some(wanted.as_slice()) {
         return Ok(());
     }
 
-    let values = FTS_COLUMNS
+    let values = declared
         .iter()
         .map(|(name, _)| format!("new.{name}"))
         .collect::<Vec<_>>()
         .join(", ");
-    let old_values = FTS_COLUMNS
+    let old_values = declared
         .iter()
         .map(|(name, _)| format!("old.{name}"))
         .collect::<Vec<_>>()
@@ -520,47 +623,59 @@ fn ensure_fts_schema(connection: &Connection) -> Result<()> {
 
     connection.execute_batch(&format!(
         r#"
-        DROP TRIGGER IF EXISTS chunks_ai;
-        DROP TRIGGER IF EXISTS chunks_ad;
-        DROP TRIGGER IF EXISTS chunks_au;
-        DROP TABLE IF EXISTS chunks_fts;
+        DROP TRIGGER IF EXISTS {trigger_prefix}_ai;
+        DROP TRIGGER IF EXISTS {trigger_prefix}_ad;
+        DROP TRIGGER IF EXISTS {trigger_prefix}_au;
+        DROP TABLE IF EXISTS {index};
 
-        CREATE VIRTUAL TABLE chunks_fts USING fts5(
+        CREATE VIRTUAL TABLE {index} USING fts5(
             {columns},
-            content='chunks',
+            content='{content_table}',
             content_rowid='id',
             tokenize='unicode61 remove_diacritics 2'
         );
 
-        CREATE TRIGGER chunks_ai AFTER INSERT ON chunks BEGIN
-            INSERT INTO chunks_fts(rowid, {columns}) VALUES (new.id, {values});
+        CREATE TRIGGER {trigger_prefix}_ai AFTER INSERT ON {content_table} BEGIN
+            INSERT INTO {index}(rowid, {columns}) VALUES (new.id, {values});
         END;
-        CREATE TRIGGER chunks_ad AFTER DELETE ON chunks BEGIN
-            INSERT INTO chunks_fts(chunks_fts, rowid, {columns}) VALUES ('delete', old.id, {old_values});
+        CREATE TRIGGER {trigger_prefix}_ad AFTER DELETE ON {content_table} BEGIN
+            INSERT INTO {index}({index}, rowid, {columns}) VALUES ('delete', old.id, {old_values});
         END;
-        CREATE TRIGGER chunks_au AFTER UPDATE ON chunks BEGIN
-            INSERT INTO chunks_fts(chunks_fts, rowid, {columns}) VALUES ('delete', old.id, {old_values});
-            INSERT INTO chunks_fts(rowid, {columns}) VALUES (new.id, {values});
+        CREATE TRIGGER {trigger_prefix}_au AFTER UPDATE ON {content_table} BEGIN
+            INSERT INTO {index}({index}, rowid, {columns}) VALUES ('delete', old.id, {old_values});
+            INSERT INTO {index}(rowid, {columns}) VALUES (new.id, {values});
         END;
 
-        INSERT INTO chunks_fts(chunks_fts) VALUES('rebuild');
+        INSERT INTO {index}({index}) VALUES('rebuild');
         "#
     ))?;
     Ok(())
 }
 
-/// The columns an existing `chunks_fts` indexes, or `None` when there is no such table.
-fn fts_existing_columns(connection: &Connection) -> Result<Option<Vec<String>>> {
+/// Reconcile both indexes against their declarations.
+fn ensure_fts_schema(connection: &Connection) -> Result<()> {
+    ensure_fts_index(connection, "chunks_fts", "chunks", FTS_COLUMNS, "chunks")?;
+    ensure_fts_index(
+        connection,
+        "documents_fts",
+        "documents",
+        DOCUMENT_FTS_COLUMNS,
+        "documents",
+    )
+}
+
+/// The columns an existing FTS index carries, or `None` when there is no such table.
+fn fts_existing_columns(connection: &Connection, index: &str) -> Result<Option<Vec<String>>> {
     let present: i64 = connection.query_row(
-        "SELECT count(*) FROM sqlite_master WHERE type = 'table' AND name = 'chunks_fts'",
-        [],
+        "SELECT count(*) FROM sqlite_master WHERE type = 'table' AND name = ?1",
+        [index],
         |row| row.get(0),
     )?;
     if present == 0 {
         return Ok(None);
     }
     // PRAGMA table_info works on an FTS5 table and lists its indexed columns in order.
-    let mut statement = connection.prepare("PRAGMA table_info(chunks_fts)")?;
+    let mut statement = connection.prepare(&format!("PRAGMA table_info({index})"))?;
     let columns = statement
         .query_map([], |row| row.get::<_, String>(1))?
         .collect::<Result<Vec<_>, _>>()?;
@@ -911,7 +1026,7 @@ mod tests {
         let expression = super::fts_bm25();
         let weights = expression.trim_end_matches(')').split(',').skip(1).count();
         assert_eq!(weights, super::FTS_COLUMNS.len());
-        assert_eq!(super::fts_column_list(), "content, heading");
+        assert_eq!(super::column_list(super::FTS_COLUMNS), "content, heading");
     }
 
     /// The query language reaching the index through the real search method.
@@ -1105,6 +1220,197 @@ mod tests {
 
         drop(storage);
         std::fs::remove_dir_all(path.parent().unwrap()).unwrap();
+    }
+
+    /// A document is findable by its filename, which no chunk's text contains.
+    #[test]
+    fn a_document_is_findable_by_its_name() {
+        let path = temporary_database("document-name");
+        let storage = Storage::open(&path).unwrap();
+        {
+            let connection = storage.connection.lock();
+            connection
+                .execute_batch(
+                    "INSERT INTO documents (path, name, extension, mime_type, modified_at,
+                                            size_bytes, content_hash, indexed_at)
+                     VALUES ('/home/u/Documents/finance/quarterly-report.pdf', 'quarterly-report.pdf',
+                             'pdf', 'application/pdf', '2026-01-01T00:00:00Z', 10, 'h',
+                             '2026-01-01T00:00:00Z');
+                     INSERT INTO chunks (document_id, chunk_index, content, heading) VALUES
+                        (1, 0, 'Nothing in this text mentions the file name at all.', 'Body'),
+                        (1, 1, 'Another passage equally silent about it.', 'More');",
+                )
+                .unwrap();
+        }
+
+        // The word is in the filename and in no chunk, so the chunk index cannot find it.
+        assert_eq!(
+            storage.keyword_search("quarterly", 10).unwrap().len(),
+            0,
+            "the chunk index has nothing to match"
+        );
+
+        let documents = storage.document_search("quarterly", 10).unwrap();
+        assert_eq!(documents.len(), 1, "the document index does");
+        assert!(
+            documents[0].snippet.to_lowercase().contains("quarterly"),
+            "and quotes where it matched: {:?}",
+            documents[0].snippet
+        );
+
+        // A folder name is searchable too, which is what indexing `path` buys.
+        assert_eq!(storage.document_search("finance", 10).unwrap().len(), 1);
+
+        drop(storage);
+        std::fs::remove_dir_all(path.parent().unwrap()).unwrap();
+    }
+
+    /// One document produces ONE hit, not one per chunk.
+    ///
+    /// The granularity decision, as a test. Measured before choosing: denormalising the name into every
+    /// chunk row and indexing it there returned 20,000 rows for a term matching 500 documents -- forty
+    /// copies of each -- and cost 21% of the database against this separate index's 0.4%.
+    #[test]
+    fn a_name_match_is_one_hit_per_document_not_per_chunk() {
+        let path = temporary_database("document-granularity");
+        let storage = Storage::open(&path).unwrap();
+        {
+            let connection = storage.connection.lock();
+            connection
+                .execute(
+                    "INSERT INTO documents (path, name, extension, mime_type, modified_at,
+                                            size_bytes, content_hash, indexed_at)
+                     VALUES ('/d/quarterly.pdf', 'quarterly.pdf', 'pdf', 'application/pdf',
+                             '2026-01-01T00:00:00Z', 10, 'h', '2026-01-01T00:00:00Z')",
+                    [],
+                )
+                .unwrap();
+            for index in 0..40 {
+                connection
+                    .execute(
+                        "INSERT INTO chunks (document_id, chunk_index, content, heading)
+                         VALUES (1, ?1, 'filler text', 'Section')",
+                        [index],
+                    )
+                    .unwrap();
+            }
+        }
+
+        assert_eq!(
+            storage.document_search("quarterly", 100).unwrap().len(),
+            1,
+            "forty chunks, one document, one hit"
+        );
+
+        // And it resolves to the document's FIRST chunk, which is what represents it.
+        let first = storage.first_chunks_of(&[1]).unwrap();
+        assert_eq!(first.len(), 1);
+        let lowest: u64 = {
+            let connection = storage.connection.lock();
+            connection
+                .query_row(
+                    "SELECT MIN(id) FROM chunks WHERE document_id = 1",
+                    [],
+                    |row| row.get(0),
+                )
+                .unwrap()
+        };
+        assert_eq!(first[0].1, lowest);
+
+        drop(storage);
+        std::fs::remove_dir_all(path.parent().unwrap()).unwrap();
+    }
+
+    /// A query naming a chunk-only field makes the document arm abstain, not fail.
+    #[test]
+    fn a_chunk_only_field_makes_the_document_arm_abstain() {
+        let path = temporary_database("document-abstain");
+        let storage = Storage::open(&path).unwrap();
+        seed_one_document(&storage);
+
+        // `heading` is not in the document index. Failing the whole search because one arm cannot express
+        // the question would be worse than that arm having nothing to say.
+        assert_eq!(
+            storage
+                .document_search("heading:appendix", 10)
+                .unwrap()
+                .len(),
+            0
+        );
+        // And the chunk arm still answers it.
+        assert_eq!(
+            storage
+                .keyword_search("heading:appendix", 10)
+                .unwrap()
+                .len(),
+            1
+        );
+
+        // A malformed query is still an error, though: abstaining is for a field this index lacks, not
+        // for a query nobody can answer.
+        assert!(storage.document_search("\"unclosed", 10).is_err());
+
+        drop(storage);
+        std::fs::remove_dir_all(path.parent().unwrap()).unwrap();
+    }
+
+    /// Both indexes are reconciled, and an older database gains the new one.
+    #[test]
+    fn a_database_without_the_document_index_gains_it() {
+        let path = temporary_database("document-migrate");
+        let storage = Storage::open(&path).unwrap();
+        {
+            let connection = storage.connection.lock();
+            // Simulate the schema-3 state: drop the newer index and its triggers, and set the version back.
+            connection
+                .execute_batch(
+                    "DROP TRIGGER IF EXISTS documents_ai;
+                     DROP TRIGGER IF EXISTS documents_ad;
+                     DROP TRIGGER IF EXISTS documents_au;
+                     DROP TABLE IF EXISTS documents_fts;",
+                )
+                .unwrap();
+            connection
+                .pragma_update(None, "user_version", 3_i64)
+                .unwrap();
+            connection
+                .execute(
+                    "INSERT INTO documents (path, name, extension, mime_type, modified_at,
+                                            size_bytes, content_hash, indexed_at)
+                     VALUES ('/d/annual.pdf', 'annual.pdf', 'pdf', 'application/pdf',
+                             '2026-01-01T00:00:00Z', 10, 'h', '2026-01-01T00:00:00Z')",
+                    [],
+                )
+                .unwrap();
+        }
+        drop(storage);
+
+        let reopened = Storage::open(&path).unwrap();
+        // Rebuilt from `documents`, so a row inserted while the index was absent is still found.
+        assert_eq!(reopened.document_search("annual", 10).unwrap().len(), 1);
+        {
+            let connection = reopened.connection.lock();
+            let version: i64 = connection
+                .pragma_query_value(None, "user_version", |row| row.get(0))
+                .unwrap();
+            assert_eq!(version, SCHEMA_VERSION);
+        }
+        reopened.integrity_check().unwrap();
+
+        drop(reopened);
+        std::fs::remove_dir_all(path.parent().unwrap()).unwrap();
+    }
+
+    /// Every indexed column of the document index has a bm25 weight.
+    #[test]
+    fn the_document_index_weights_match_its_columns() {
+        let expression = super::document_fts_bm25();
+        let weights = expression.trim_end_matches(')').split(',').skip(1).count();
+        assert_eq!(weights, super::DOCUMENT_FTS_COLUMNS.len());
+        assert_eq!(
+            super::column_list(super::DOCUMENT_FTS_COLUMNS),
+            "name, path"
+        );
     }
 
     /// Insert one document whose heading carries a term its body does not.
