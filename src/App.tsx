@@ -7,36 +7,10 @@ import {
   type FormEvent,
   type ReactNode,
 } from "react";
-import {
-  Archive,
-  ArrowRight,
-  Bot,
-  Check,
-  ChevronRight,
-  CircleHelp,
-  Database,
-  ExternalLink,
-  File,
-  FileCode2,
-  FileText,
-  Folder,
-  FolderOpen,
-  HardDrive,
-  KeyRound,
-  Library,
-  LoaderCircle,
-  LockKeyhole,
-  MessageSquareText,
-  Plus,
-  RefreshCw,
-  Search,
-  Settings,
-  ShieldCheck,
-  Sparkles,
-  Trash2,
-  Unplug,
-  X,
-} from "lucide-react";
+import { Loader, Mark, type IconName } from "@redrob-labs/ui";
+import symbolDark from "./assets/brand/redrob-symbol-solid-white.png";
+import symbolLight from "./assets/brand/redrob-symbol.png";
+import { Icon } from "./ui/Icon";
 import { bridge } from "./lib/bridge";
 import type {
   AppSettings,
@@ -153,27 +127,26 @@ function Sidebar({
   setView: (view: View) => void;
   snapshot: AppSnapshot;
 }) {
-  const nav: { id: View; label: string; icon: typeof Search }[] = [
-    { id: "search", label: "Search", icon: Search },
-    { id: "ask", label: "Ask", icon: MessageSquareText },
-    { id: "sources", label: "Sources", icon: Library },
+  const nav: { id: View; label: string; icon: IconName }[] = [
+    { id: "search", label: "Search", icon: "search" },
+    { id: "ask", label: "Ask", icon: "message" },
+    { id: "sources", label: "Sources", icon: "bookOpen" },
   ];
   return (
-    <aside className="sidebar">
+    <aside className="sidebar" data-theme="dark">
       <div className="wordmark">
         <Logo />
-        <span>Recall</span>
+        <span>Redrob Recall</span>
       </div>
       <nav className="nav-list" aria-label="Main navigation">
         {nav.map((item) => {
-          const Icon = item.icon;
           return (
             <button
               key={item.id}
               className={view === item.id ? "nav-item active" : "nav-item"}
               onClick={() => setView(item.id)}
             >
-              <Icon size={18} />
+              <Icon name={item.icon} />
               <span>{item.label}</span>
             </button>
           );
@@ -196,11 +169,11 @@ function Sidebar({
         className={view === "settings" ? "nav-item active" : "nav-item"}
         onClick={() => setView("settings")}
       >
-        <Settings size={18} />
+        <Icon name="settings" size={24} />
         <span>Settings</span>
       </button>
       <div className="privacy-foot">
-        <ShieldCheck size={14} />
+        <Icon name="shieldCheck" />
         <span>Files stay on this device</span>
       </div>
     </aside>
@@ -233,14 +206,14 @@ function Onboarding({
     }
   };
   return (
-    <div className="onboarding">
+    <div className="onboarding" data-theme="dark">
       <header className="onboarding-header">
         <div className="wordmark">
           <Logo />
-          <span>Recall</span>
+          <span>Redrob Recall</span>
         </div>
         <span className="local-badge">
-          <LockKeyhole size={14} /> Private by default
+          <Icon name="lock" /> Private by default
         </span>
       </header>
       <div className="onboarding-grid">
@@ -257,9 +230,9 @@ function Onboarding({
             disabled={adding}
           >
             {adding ? (
-              <LoaderCircle className="spin" size={19} />
+              <Loader size="sm" label="Adding folders" />
             ) : (
-              <FolderOpen size={19} />
+              <Icon name="folderOpen" size={24} />
             )}{" "}
             Choose folders
           </button>
@@ -279,25 +252,25 @@ function Onboarding({
           <div className="visual-orbit orbit-one" />
           <div className="visual-orbit orbit-two" />
           <div className="visual-card source-card one">
-            <FileText size={20} />
+            <Icon name="fileText" size={24} />
             <div>
               <strong>Quarterly plan.pdf</strong>
               <span>Page 14</span>
             </div>
           </div>
           <div className="visual-card source-card two">
-            <FileCode2 size={20} />
+            <Icon name="fileCode" size={24} />
             <div>
               <strong>project-notes.md</strong>
               <span>Documents</span>
             </div>
           </div>
           <div className="visual-card search-card">
-            <Search size={22} />
+            <Icon name="search" size={24} />
             <span>the plan we discussed last winter</span>
           </div>
           <div className="local-core">
-            <Database size={25} />
+            <Icon name="database" size={24} />
             <span>Local index</span>
             <small>~/.redrob/recall</small>
           </div>
@@ -305,7 +278,7 @@ function Onboarding({
       </div>
       <footer className="onboarding-footer">
         <span>
-          <HardDrive size={15} /> Stored at {snapshot.dataDirectory}
+          <Icon name="stack" /> Stored at {snapshot.dataDirectory}
         </span>
         <span>Redrob Recall {snapshot.appVersion}</span>
       </footer>
@@ -385,21 +358,21 @@ function SearchView({
         </div>
         <div className="header-meta">
           <span>
-            <Database size={15} /> {formatNumber(snapshot.stats.indexedChunks)}{" "}
+            <Icon name="database" /> {formatNumber(snapshot.stats.indexedChunks)}{" "}
             passages
           </span>
           <span className={snapshot.stats.status === "idle" ? "ready" : "busy"}>
             {snapshot.stats.status === "idle" ? (
-              <Check size={14} />
+              <Icon name="check" />
             ) : (
-              <LoaderCircle className="spin" size={14} />
+              <Loader size="sm" label={statusLabel(snapshot.stats.status)} />
             )}{" "}
             {statusLabel(snapshot.stats.status)}
           </span>
         </div>
       </header>
       <form className="search-box" onSubmit={submit}>
-        <Search size={22} />
+        <Icon name="search" size={24} />
         <input
           ref={inputRef}
           value={query}
@@ -421,7 +394,7 @@ function SearchView({
               setHasSearched(false);
             }}
           >
-            <X size={18} />
+            <Icon name="close" size={24} />
           </button>
         )}
         <button
@@ -430,16 +403,16 @@ function SearchView({
           disabled={searching || !query.trim()}
         >
           {searching ? (
-            <LoaderCircle className="spin" size={18} />
+            <Loader size="sm" label="Searching" />
           ) : (
-            <ArrowRight size={18} />
+            <Icon name="arrowRight" size={24} />
           )}
         </button>
       </form>
       {!hasSearched ? (
         <div className="search-empty">
           <div className="search-empty-icon">
-            <Sparkles size={26} />
+            <Icon name="sparkle" size={24} />
           </div>
           <h2>Search by meaning, not filenames.</h2>
           <p>Try a phrase, an idea, or the part you remember.</p>
@@ -457,7 +430,7 @@ function SearchView({
                 }}
               >
                 <span>“{suggestion}”</span>
-                <ChevronRight size={16} />
+                <Icon name="chevronRight" />
               </button>
             ))}
           </div>
@@ -510,7 +483,7 @@ function SearchView({
               />
             ) : (
               <div className="preview-placeholder">
-                <File size={26} />
+                <Icon name="file" size={24} />
                 <span>Select a result to preview it</span>
               </div>
             )}
@@ -580,14 +553,14 @@ function ResultPreview({
     <div className="preview-content">
       <div className="preview-actions">
         <button className="secondary" onClick={() => void open()}>
-          <ExternalLink size={15} /> Open file
+          <Icon name="external" /> Open file
         </button>
         <button
           className="icon-button"
           title="Show in folder"
           onClick={() => void reveal()}
         >
-          <FolderOpen size={17} />
+          <Icon name="folderOpen" size={24} />
         </button>
       </div>
       <div className={`preview-file-icon ${result.extension}`}>
@@ -608,9 +581,9 @@ function ResultPreview({
       </div>
       <blockquote>{result.content}</blockquote>
       <button className="ask-about" onClick={ask}>
-        <Sparkles size={17} />
+        <Icon name="sparkle" size={24} />
         <span>Ask about this and related files</span>
-        <ArrowRight size={17} />
+        <Icon name="arrowRight" size={24} />
       </button>
     </div>
   );
@@ -653,14 +626,14 @@ function AskView({
           <h1>Answers with receipts.</h1>
         </div>
         <span className="privacy-chip">
-          <LockKeyhole size={14} /> Only relevant excerpts are sent
+          <Icon name="lock" /> Only relevant excerpts are sent
         </span>
       </header>
       <div className="ask-stage">
         {!answer && !asking ? (
           <div className="ask-intro">
             <div className="ask-orb">
-              <Bot size={28} />
+              <Icon name="sparkle" size={24} />
             </div>
             <h2>What do you want to know?</h2>
             <p>
@@ -675,7 +648,7 @@ function AskView({
               ].map((item) => (
                 <button key={item} onClick={() => setQuestion(item)}>
                   {item}
-                  <ChevronRight size={15} />
+                  <Icon name="chevronRight" />
                 </button>
               ))}
             </div>
@@ -683,16 +656,16 @@ function AskView({
         ) : asking ? (
           <div className="thinking">
             <div className="thinking-mark">
-              <Sparkles size={24} />
+              <Icon name="sparkle" size={24} />
             </div>
             <h2>Looking through your library…</h2>
             <div className="thinking-steps">
               <span className="done">
-                <Check size={14} /> Searching{" "}
+                <Icon name="check" /> Searching{" "}
                 {formatNumber(snapshot.stats.indexedChunks)} passages
               </span>
               <span>
-                <LoaderCircle className="spin" size={14} /> Reading the
+                <Loader size="sm" label="Reading the strongest evidence" /> Reading the
                 strongest evidence
               </span>
               <span>Composing an answer with citations</span>
@@ -717,14 +690,14 @@ function AskView({
         />
         <div className="composer-bottom">
           <span>
-            <Database size={14} /> {formatNumber(snapshot.stats.documents)}{" "}
+            <Icon name="database" /> {formatNumber(snapshot.stats.documents)}{" "}
             local files
           </span>
           <button className="primary" disabled={asking || !question.trim()}>
             {asking ? (
-              <LoaderCircle className="spin" size={17} />
+              <Loader size="sm" label="Asking Redrob" />
             ) : (
-              <Sparkles size={17} />
+              <Icon name="sparkle" size={24} />
             )}{" "}
             Ask Redrob
           </button>
@@ -732,10 +705,10 @@ function AskView({
       </form>
       {askError && (
         <div className="ask-error" role="alert">
-          <CircleHelp size={17} />
+          <Icon name="warning" size={24} />
           <span>{askError}</span>
           <button onClick={() => setAskError(null)} aria-label="Dismiss error">
-            <X size={15} />
+            <Icon name="close" />
           </button>
         </div>
       )}
@@ -761,7 +734,7 @@ function AnswerCard({
     <div className="answer-layout">
       <article className="answer-card">
         <div className="answer-label">
-          <Sparkles size={16} /> REDROB ANSWER
+          <Icon name="sparkle" /> REDROB ANSWER
         </div>
         <div className="answer-text">{answer.answer}</div>
         <div className="answer-meta">
@@ -797,7 +770,7 @@ function AnswerCard({
               </span>
               <p>{source.excerpt}</p>
             </div>
-            <ExternalLink size={14} />
+            <Icon name="external" />
           </button>
         ))}
       </aside>
@@ -858,27 +831,27 @@ function SourcesView({
           <h1>Sources</h1>
         </div>
         <button className="primary" onClick={() => void addFolder()}>
-          <Plus size={17} /> Add folder
+          <Icon name="plus" size={24} /> Add folder
         </button>
       </header>
       <div className="stat-grid">
         <Stat
-          icon={<FileText />}
+          icon={<Icon name="fileText" />}
           label="Files"
           value={formatNumber(snapshot.stats.documents)}
         />
         <Stat
-          icon={<Archive />}
+          icon={<Icon name="archive" />}
           label="Passages"
           value={formatNumber(snapshot.stats.indexedChunks)}
         />
         <Stat
-          icon={<HardDrive />}
+          icon={<Icon name="stack" />}
           label="On this device"
           value={formatBytes(snapshot.stats.totalBytes)}
         />
         <Stat
-          icon={<CircleHelp />}
+          icon={<Icon name="warning" />}
           label="Needs attention"
           value={formatNumber(snapshot.stats.failed)}
           tone={snapshot.stats.failed ? "warn" : undefined}
@@ -899,14 +872,14 @@ function SourcesView({
                 .catch((error) => notify(readError(error), "error"))
             }
           >
-            <RefreshCw size={15} /> Check now
+            <Icon name="refresh" /> Check now
           </button>
         </div>
         <div className="folder-list">
           {snapshot.settings.libraryPaths.map((path) => (
             <div className="folder-row" key={path}>
               <span className="folder-icon">
-                <Folder size={19} />
+                <Icon name="folder" size={24} />
               </span>
               <div>
                 <strong>{lastPathPart(path)}</strong>
@@ -920,7 +893,7 @@ function SourcesView({
                 title="Remove folder"
                 onClick={() => void removeFolder(path)}
               >
-                <Trash2 size={16} />
+                <Icon name="trash" />
               </button>
             </div>
           ))}
@@ -935,7 +908,7 @@ function SourcesView({
         </div>
         {loading ? (
           <div className="table-loading">
-            <LoaderCircle className="spin" /> Loading files…
+            <Loader size="md" label="Loading files" /> Loading files…
           </div>
         ) : (
           <div className="document-table">
@@ -1112,13 +1085,13 @@ function SettingsView({
         )}
         {saving && (
           <span className="saving">
-            <LoaderCircle className="spin" size={15} /> Saving
+            <Loader size="sm" label="Saving" /> Saving
           </span>
         )}
       </header>
       <div className="settings-stack">
         <SettingsSection
-          icon={<KeyRound />}
+          icon={<Icon name="key" />}
           title="Redrob connection"
           description="AI answers use your existing Redrob workspace and balance."
         >
@@ -1131,9 +1104,9 @@ function SettingsView({
               }
             >
               {snapshot.connection.connected ? (
-                <Check size={19} />
+                <Icon name="check" size={24} />
               ) : (
-                <Unplug size={19} />
+                <Icon name="plug" size={24} />
               )}
             </div>
             <div>
@@ -1164,7 +1137,7 @@ function SettingsView({
           </div>
         </SettingsSection>
         <SettingsSection
-          icon={<ShieldCheck />}
+          icon={<Icon name="shieldCheck" />}
           title="Privacy"
           description="Control exactly when text can leave this computer."
         >
@@ -1177,7 +1150,7 @@ function SettingsView({
             }
           />
           <div className="privacy-detail">
-            <LockKeyhole size={16} />
+            <Icon name="lock" />
             <div>
               <strong>Always local</strong>
               <span>
@@ -1188,7 +1161,7 @@ function SettingsView({
           </div>
         </SettingsSection>
         <SettingsSection
-          icon={<Database />}
+          icon={<Icon name="database" />}
           title="Indexing"
           description="Tune what is searchable and how much space it can use."
         >
@@ -1252,7 +1225,7 @@ function SettingsView({
           </div>
         </SettingsSection>
         <SettingsSection
-          icon={<HardDrive />}
+          icon={<Icon name="stack" />}
           title="Storage"
           description="The index can be rebuilt from your original files at any time."
         >
@@ -1273,23 +1246,23 @@ function SettingsView({
                 disabled={maintenanceBusy}
                 onClick={() => void checkHealth()}
               >
-                <ShieldCheck size={16} /> Check health
+                <Icon name="shieldCheck" /> Check health
               </button>
               <button
                 className="secondary"
                 disabled={maintenanceBusy}
                 onClick={() => void createBackup()}
               >
-                <Archive size={16} /> Create backup
+                <Icon name="archive" /> Create backup
               </button>
               <button className="danger-button" onClick={() => void clear()}>
-                <Trash2 size={16} /> Clear local index
+                <Icon name="trash" /> Clear local index
               </button>
             </div>
           </div>
         </SettingsSection>
         <SettingsSection
-          icon={<RefreshCw />}
+          icon={<Icon name="refresh" />}
           title="Updates"
           description="Updates are verified with Redrob's release signature before installation."
         >
@@ -1303,7 +1276,7 @@ function SettingsView({
               disabled={maintenanceBusy}
               onClick={() => void checkForUpdates()}
             >
-              <RefreshCw size={16} /> Check for updates
+              <Icon name="refresh" /> Check for updates
             </button>
           </div>
         </SettingsSection>
@@ -1402,7 +1375,7 @@ function ConnectModal({
           onClick={close}
           aria-label="Close dialog"
         >
-          <X size={18} />
+          <Icon name="close" size={24} />
         </button>
         <div className="modal-brand">
           <Logo />
@@ -1428,9 +1401,9 @@ function ConnectModal({
             disabled={submitting || apiKey.trim().length < 16}
           >
             {submitting ? (
-              <LoaderCircle className="spin" size={17} />
+              <Loader size="sm" label="Connecting this device" />
             ) : (
-              <KeyRound size={17} />
+              <Icon name="key" size={24} />
             )}{" "}
             Connect this device
           </button>
@@ -1444,10 +1417,10 @@ function ConnectModal({
               .catch((error) => notify(readError(error), "error"))
           }
         >
-          Create or manage API keys <ExternalLink size={14} />
+          Create or manage API keys <Icon name="external" />
         </button>
         <div className="modal-privacy">
-          <ShieldCheck size={15} /> Search remains local whether or not you
+          <Icon name="shieldCheck" /> Search remains local whether or not you
           connect.
         </div>
       </div>
@@ -1534,9 +1507,9 @@ function ProgressBar({ progress }: { progress: IndexProgress }) {
     ? Math.round((progress.processed / progress.total) * 100)
     : 0;
   return (
-    <div className="progress-toast">
+    <div className="progress-toast" data-theme="dark">
       <div className="progress-copy">
-        <LoaderCircle className="spin" size={17} />
+        <Loader size="sm" label={progress.message} />
         <div>
           <strong>{progress.message}</strong>
           <span>{progress.currentFile ?? "Scanning folders"}</span>
@@ -1555,11 +1528,11 @@ function ToastStack({ toasts }: { toasts: Toast[] }) {
       {toasts.map((toast) => (
         <div key={toast.id} className={`toast ${toast.tone}`}>
           {toast.tone === "success" ? (
-            <Check size={16} />
+            <Icon name="check" />
           ) : toast.tone === "error" ? (
-            <X size={16} />
+            <Icon name="close" />
           ) : (
-            <Sparkles size={16} />
+            <Icon name="sparkle" />
           )}
           <span>{toast.message}</span>
         </div>
@@ -1567,24 +1540,57 @@ function ToastStack({ toasts }: { toasts: Toast[] }) {
     </div>
   );
 }
+// 10-logo.md forbids a tile beside a typed name, and the artwork is "Never redrawn, restretched,
+// recolored or otherwise modified" -- which a letter R in a gradient tile is not a modification of,
+// it is a different mark. So this places the shipped symbol, and the product name sits after it at
+// 14px/600/ink-primary, which is what AppShell does.
+//
+// Two files, not one recolored one: assets/Symbol/README.md gives the gradient symbol to light
+// grounds and solid-white to dark ones. Both are pinned by sha256 in DESIGN_SYSTEM_PIN.json.
 function Logo() {
   return (
-    <span className="logo">
-      R<span />
-    </span>
+    <Mark
+      src={symbolLight}
+      darkSrc={symbolDark}
+      height={24}
+      alt=""
+      className="logo"
+    />
   );
 }
+// Type is the glyph's job. Colour used to do it -- PDF red, DOCX blue, Markdown violet -- which meant a
+// healthy PDF wore the colour this app uses for failure. The set ships a glyph per document view, so
+// the distinction moves there and every tile takes one ink.
+const FILE_GLYPH: Record<string, IconName> = {
+  pdf: "filePdf",
+  csv: "fileSheet",
+  tsv: "fileSheet",
+  xlsx: "fileSheet",
+  png: "fileImage",
+  jpg: "fileImage",
+  jpeg: "fileImage",
+  gif: "fileImage",
+  webp: "fileImage",
+  zip: "fileZip",
+  gz: "fileZip",
+  md: "fileCode",
+  json: "fileCode",
+  html: "fileCode",
+  htm: "fileCode",
+  xml: "fileCode",
+  yml: "fileCode",
+  yaml: "fileCode",
+};
+
 function FileTypeIcon({ extension }: { extension: string }) {
-  return extension === "md" || extension === "json" || extension === "html" ? (
-    <FileCode2 size={20} />
-  ) : (
-    <FileText size={20} />
+  return (
+    <Icon name={FILE_GLYPH[extension.toLowerCase()] ?? "fileText"} size={24} />
   );
 }
 function NoResults() {
   return (
     <div className="no-results">
-      <Search size={25} />
+      <Icon name="search" size={24} />
       <h3>Nothing matched that yet.</h3>
       <p>Try fewer details, another phrase, or check your watched folders.</p>
     </div>
@@ -1592,11 +1598,11 @@ function NoResults() {
 }
 function BootState() {
   return (
-    <main className="boot-screen">
+    <main className="boot-screen" data-theme="dark">
       <Logo />
       <h1>Redrob Recall</h1>
       <p>
-        <LoaderCircle className="spin" size={16} /> Opening your local library…
+        <Loader size="sm" label="Opening your local library" /> Opening your local library…
       </p>
     </main>
   );
@@ -1611,12 +1617,12 @@ function FatalState({
   return (
     <main className="fatal-state">
       <div className="fatal-icon">
-        <Database size={25} />
+        <Icon name="database" size={24} />
       </div>
       <h1>Your local library could not open.</h1>
       <p>{error}</p>
       <button className="primary" onClick={() => void retry()}>
-        <RefreshCw size={17} /> Try again
+        <Icon name="refresh" size={24} /> Try again
       </button>
     </main>
   );
