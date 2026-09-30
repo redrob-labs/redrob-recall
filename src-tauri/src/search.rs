@@ -25,10 +25,13 @@ pub fn search(state: &AppState, request: SearchRequest) -> Result<Vec<SearchResu
         score.combined += 1.0 / (60.0 + rank as f32 + 1.0);
         score.vector = *raw_score;
     }
-    for (rank, (id, raw_score)) in keyword.iter().enumerate() {
-        let score = fused.entry(*id).or_default();
+    for (rank, hit) in keyword.iter().enumerate() {
+        let score = fused.entry(hit.chunk_id).or_default();
         score.combined += 1.0 / (60.0 + rank as f32 + 1.0);
-        score.keyword = *raw_score;
+        score.keyword = hit.score;
+        if !hit.snippet.is_empty() {
+            score.snippet = Some(hit.snippet.clone());
+        }
     }
 
     let mut ranked = fused.into_iter().collect::<Vec<_>>();
@@ -61,6 +64,7 @@ pub fn search(state: &AppState, request: SearchRequest) -> Result<Vec<SearchResu
             page: chunk.page,
             heading: chunk.heading,
             content: chunk.content,
+            snippet: fusion.snippet.clone(),
             score: fusion.combined,
             vector_score: fusion.vector,
             keyword_score: fusion.keyword,
@@ -117,4 +121,10 @@ struct FusionScore {
     combined: f32,
     vector: f32,
     keyword: f32,
+    /// The window FTS5 chose around the match, when the keyword half found this chunk.
+    ///
+    /// Absent for a vector-only hit, which has no single matching term to centre on -- the result falls
+    /// back to the head of the chunk there, and that is honest rather than a gap: a semantic match is a
+    /// whole-passage judgement, so there is nothing to point at.
+    snippet: Option<String>,
 }

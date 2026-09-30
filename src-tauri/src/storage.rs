@@ -54,6 +54,27 @@ pub struct Storage {
     path: Arc<PathBuf>,
 }
 
+/// How many tokens an FTS5 snippet carries around the match.
+///
+/// 40 rather than FTS5's 32 default: a snippet is what a person reads to decide whether a result is the
+/// one they wanted, and what the answering model is given as evidence, so a little more surrounding
+/// sentence is worth the characters. Capped by FTS5 itself at 64.
+const SNIPPET_TOKENS: i64 = 40;
+
+/// One keyword hit: the chunk, its rank, and the text around the match.
+#[derive(Debug, Clone)]
+pub struct KeywordHit {
+    pub chunk_id: u64,
+    pub score: f32,
+    /// The window FTS5 selected around the matching terms, with `…` where it cut.
+    ///
+    /// Carried out of the search rather than recomputed later, because only the query that ran the
+    /// MATCH knows where the match was. Before this, the excerpt was the whole chunk truncated from its
+    /// FIRST character -- measured on a 1,117-character chunk whose match began at character 824, the
+    /// 120-character excerpt handed to the answering model did not contain the searched term at all.
+    pub snippet: String,
+}
+
 impl Storage {
     pub fn open(path: &Path) -> Result<Self> {
         let had_database =
@@ -287,7 +308,7 @@ impl Storage {
     /// A malformed query is an ERROR rather than an empty result, and deliberately so -- "a quotation
     /// mark is not closed" is something a person can act on, where zero results looks like the corpus
     /// simply has nothing.
-    pub fn keyword_search(&self, query: &str, limit: usize) -> Result<Vec<(u64, f32)>> {
+    pub fn keyword_search(&self, query: &str, limit: usize) -> Result<Vec<KeywordHit>> {
         let columns: Vec<&str> = FTS_COLUMNS.iter().map(|(name, _)| *name).collect();
         let expression = crate::query::to_match_expression(query, &columns)?;
         let connection = self.connection.lock();
@@ -295,13 +316,22 @@ impl Storage {
         // this call site is exactly what would drift when a column is added -- and SQLite accepts a
         // wrong-length weight list without complaining.
         let bm25 = fts_bm25();
+        // The snippet is selected HERE, in the query that ran the MATCH, because that is the only place
+        // that knows where the match was. Column -1 lets FTS5 pick whichever indexed column matched, so
+        // a heading hit is quoted from the heading rather than from unrelated body text.
         let mut statement = connection.prepare(&format!(
-            "SELECT rowid, {bm25} FROM chunks_fts WHERE chunks_fts MATCH ?1 ORDER BY {bm25} LIMIT ?2"
+            "SELECT rowid, {bm25}, snippet(chunks_fts, -1, '', '', '…', {SNIPPET_TOKENS})
+             FROM chunks_fts WHERE chunks_fts MATCH ?1 ORDER BY {bm25} LIMIT ?2"
         ))?;
         let rows = statement.query_map(params![expression, limit as u64], |row| {
-            let id: u64 = row.get(0)?;
+            let chunk_id: u64 = row.get(0)?;
             let rank: f64 = row.get(1)?;
-            Ok((id, (1.0 / (1.0 + rank.abs())) as f32))
+            let snippet: String = row.get(2).unwrap_or_default();
+            Ok(KeywordHit {
+                chunk_id,
+                score: (1.0 / (1.0 + rank.abs())) as f32,
+                snippet,
+            })
         })?;
         rows.collect::<Result<Vec<_>, _>>().map_err(Into::into)
     }
@@ -959,6 +989,118 @@ mod tests {
         assert!(
             unknown.contains("author"),
             "names what was wrong: {unknown}"
+        );
+
+        drop(storage);
+        std::fs::remove_dir_all(path.parent().unwrap()).unwrap();
+    }
+
+    /// The snippet is the text AROUND the match, not the head of the chunk.
+    ///
+    /// The defect this replaces, measured: the excerpt was the whole chunk and the answer context budget
+    /// truncated it from the first character, so on a long chunk whose match came late the model was
+    /// handed source text that did not contain the searched term and asked to answer from it.
+    #[test]
+    fn a_snippet_is_taken_from_around_the_match() {
+        let path = temporary_database("snippet");
+        let storage = Storage::open(&path).unwrap();
+        {
+            let connection = storage.connection.lock();
+            let filler = "Filler sentence about unrelated matters. ".repeat(20);
+            let tail = "More filler afterwards. ".repeat(10);
+            let content =
+                format!("{filler}The revenue recognition policy applies to subscriptions. {tail}");
+            assert!(
+                content.find("revenue").unwrap() > 700,
+                "the match must be far from the start for this test to mean anything"
+            );
+            connection
+                .execute(
+                    "INSERT INTO documents (path, name, extension, mime_type, modified_at,
+                                            size_bytes, content_hash, indexed_at)
+                     VALUES ('/d.md', 'd.md', 'md', 'text/markdown', '2026-01-01T00:00:00Z', 10,
+                             'h', '2026-01-01T00:00:00Z')",
+                    [],
+                )
+                .unwrap();
+            connection
+                .execute(
+                    "INSERT INTO chunks (document_id, chunk_index, content, heading)
+                     VALUES (1, 0, ?1, 'Intro')",
+                    [&content],
+                )
+                .unwrap();
+        }
+
+        let hits = storage.keyword_search("revenue", 5).unwrap();
+        assert_eq!(hits.len(), 1);
+        let snippet = &hits[0].snippet;
+
+        assert!(
+            snippet.contains("revenue"),
+            "the snippet must contain what was searched for, got {snippet:?}"
+        );
+        assert!(
+            snippet.len() < 600,
+            "the snippet must be a window, not the chunk: {} characters",
+            snippet.len()
+        );
+        assert!(
+            snippet.contains('…'),
+            "and must mark where it cut: {snippet:?}"
+        );
+
+        drop(storage);
+        std::fs::remove_dir_all(path.parent().unwrap()).unwrap();
+    }
+
+    /// A heading match is quoted from the heading, not from unrelated body text.
+    #[test]
+    fn a_heading_match_is_quoted_from_the_heading() {
+        let path = temporary_database("snippet-heading");
+        let storage = Storage::open(&path).unwrap();
+        seed_one_document(&storage);
+
+        // "Appendix" appears only in the second chunk's heading.
+        let hits = storage.keyword_search("appendix", 5).unwrap();
+        assert_eq!(hits.len(), 1);
+        assert!(
+            hits[0].snippet.to_lowercase().contains("appendix"),
+            "column -1 lets FTS5 quote the column that matched: {:?}",
+            hits[0].snippet
+        );
+
+        drop(storage);
+        std::fs::remove_dir_all(path.parent().unwrap()).unwrap();
+    }
+
+    /// A function word must not turn an AND into an exclusion of real matches.
+    ///
+    /// Measured: with AND semantics, `the revenue` required both terms, so a chunk reading "revenue
+    /// recognition applies..." was excluded for lacking "the". bm25 needs no help ranking common terms --
+    /// it scored "the" at -1.6e-6 against "revenue"'s -4.29 -- so this is about what MATCHES, not order.
+    #[test]
+    fn a_function_word_does_not_exclude_real_matches() {
+        let path = temporary_database("stopwords");
+        let storage = Storage::open(&path).unwrap();
+        seed_one_document(&storage);
+
+        let with = storage.keyword_search("the recognition", 10).unwrap().len();
+        let without = storage.keyword_search("recognition", 10).unwrap().len();
+        assert_eq!(with, without, "the leading function word changed nothing");
+
+        // But a phrase is exact, and rewriting it would answer a different question. The fixture's
+        // second chunk reads "per the policy", so the phrase IS there -- and the reversed phrase is not,
+        // which is what proves the function word survived rather than being quietly dropped.
+        assert_eq!(
+            storage.keyword_search("\"the policy\"", 10).unwrap().len(),
+            1,
+            "the exact phrase is present"
+        );
+        assert_eq!(
+            storage.keyword_search("\"policy the\"", 10).unwrap().len(),
+            0,
+            "reversed it is not, so the phrase was matched in order with its function word intact"
         );
 
         drop(storage);

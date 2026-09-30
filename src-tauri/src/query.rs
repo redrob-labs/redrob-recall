@@ -342,6 +342,63 @@ fn word_node(column: Option<String>, text: String) -> Node {
     }
 }
 
+/// Function words dropped from a LOOSE term position, and only from there.
+///
+/// Not a ranking device. Measured on a real index: bm25 already collapses a term that appears in every
+/// document to near nothing -- "the" scored -1.6e-6 against "revenue"'s -4.29 -- so a stopword list buys
+/// no ranking improvement, and it would be worse than bm25 at the job because the right list depends on
+/// the corpus and its language while bm25 measures the corpus it actually has.
+///
+/// What they fix is the AND semantics this parser introduced. Measured: a person typing `the revenue`
+/// now requires BOTH terms, so a document reading "revenue recognition applies to subscription
+/// contracts" is excluded for lacking the word "the" -- which is not what they asked. Dropping the
+/// function word returns it.
+///
+/// Never dropped from a PHRASE or a field-scoped term. Also measured: `"the revenue"` as a phrase means
+/// something different from `"revenue"`, and silently rewriting it would answer a question nobody asked.
+/// English only, because guessing at a document's language from a query is worse than doing nothing --
+/// and a term is only dropped when something else remains to search for.
+const LOOSE_STOPWORDS: &[&str] = &[
+    "a", "an", "and", "are", "as", "at", "be", "but", "by", "for", "from", "has", "have", "in",
+    "is", "it", "its", "of", "on", "or", "that", "the", "to", "was", "were", "will", "with",
+];
+
+fn is_stopword(text: &str) -> bool {
+    let lower = text.to_ascii_lowercase();
+    LOOSE_STOPWORDS.iter().any(|word| *word == lower)
+}
+
+/// Drop stopwords from the loose term positions of an `All` group, keeping at least one term.
+///
+/// Only `All` is touched. An `Any` group is a person listing alternatives, and removing one changes
+/// which documents match rather than merely relaxing a requirement.
+fn drop_loose_stopwords(node: Node) -> Node {
+    match node {
+        Node::All(parts) => {
+            let pruned: Vec<Node> = parts.into_iter().map(drop_loose_stopwords).collect();
+            let kept: Vec<Node> = pruned
+                .iter()
+                .filter(|part| {
+                    !matches!(
+                        part,
+                        Node::Term { column: None, text, prefix: false } if is_stopword(text)
+                    )
+                })
+                .cloned()
+                .collect();
+            // If every term was a function word, the person meant those words after all.
+            let kept = if kept.is_empty() { pruned } else { kept };
+            if kept.len() == 1 {
+                kept.into_iter().next().expect("one")
+            } else {
+                Node::All(kept)
+            }
+        }
+        Node::Any(parts) => Node::Any(parts.into_iter().map(drop_loose_stopwords).collect()),
+        other => other,
+    }
+}
+
 /// Parse a person's query. `columns` is the searchable field list, lower-cased.
 pub fn parse(input: &str, columns: &[&str]) -> Result<Query, QueryError> {
     let mut tokens = tokenize(input)?;
@@ -375,7 +432,7 @@ pub fn parse(input: &str, columns: &[&str]) -> Result<Query, QueryError> {
         // Anything left over is an unbalanced bracket; the loops above stop at a `)` they did not open.
         return Err(QueryError::UnclosedGroup);
     }
-    let include = prune(include);
+    let include = drop_loose_stopwords(prune(include));
     match &include {
         Node::All(parts) if parts.is_empty() => {
             if exclude.is_empty() {
@@ -523,15 +580,24 @@ mod tests {
 
     #[test]
     fn explicit_operators_work_and_or_binds_loosest() {
-        assert_eq!(expression("a AND b"), "(\"a\" AND \"b\")");
-        assert_eq!(expression("a OR b"), "(\"a\" OR \"b\")");
-        // `a b OR c` is `(a AND b) OR c`, not `a AND (b OR c)`.
-        assert_eq!(expression("a b OR c"), "((\"a\" AND \"b\") OR \"c\")");
+        // Deliberately not `a`, `b`, `c`: "a" is a function word, and an earlier version of this test
+        // used it as a placeholder and then failed once stopword pruning arrived. A test's placeholder
+        // must not be a value the code treats specially.
+        assert_eq!(expression("alpha AND beta"), "(\"alpha\" AND \"beta\")");
+        assert_eq!(expression("alpha OR beta"), "(\"alpha\" OR \"beta\")");
+        // `alpha beta OR gamma` is `(alpha AND beta) OR gamma`, not `alpha AND (beta OR gamma)`.
+        assert_eq!(
+            expression("alpha beta OR gamma"),
+            "((\"alpha\" AND \"beta\") OR \"gamma\")"
+        );
     }
 
     #[test]
     fn brackets_override_precedence() {
-        assert_eq!(expression("a (b OR c)"), "(\"a\" AND (\"b\" OR \"c\"))");
+        assert_eq!(
+            expression("alpha (beta OR gamma)"),
+            "(\"alpha\" AND (\"beta\" OR \"gamma\"))"
+        );
     }
 
     #[test]
@@ -607,8 +673,11 @@ mod tests {
         assert_eq!(error("(unclosed"), QueryError::UnclosedGroup);
         assert_eq!(error("unopened)"), QueryError::UnclosedGroup);
         assert_eq!(error("()"), QueryError::EmptyGroup);
-        assert!(matches!(error("a AND"), QueryError::DanglingOperator(_)));
-        assert!(matches!(error("OR b"), QueryError::DanglingOperator(_)));
+        assert!(matches!(
+            error("alpha AND"),
+            QueryError::DanglingOperator(_)
+        ));
+        assert!(matches!(error("OR beta"), QueryError::DanglingOperator(_)));
     }
 
     #[test]

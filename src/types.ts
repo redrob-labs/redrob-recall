@@ -60,6 +60,8 @@ export interface SearchResult {
   page?: number;
   heading?: string;
   content: string;
+  /** The window around the matching terms, when the keyword half found this chunk. */
+  snippet?: string;
   score: number;
   vectorScore: number;
   keywordScore: number;

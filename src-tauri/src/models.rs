@@ -211,6 +211,13 @@ pub struct SearchResult {
     pub page: Option<u32>,
     pub heading: Option<String>,
     pub content: String,
+    /// The window around the matching terms, when the keyword half found this chunk.
+    ///
+    /// Distinct from `content`, which is the whole chunk. A vector-only hit has none: a semantic match
+    /// is a judgement about a whole passage, so there is no single place to point at, and inventing one
+    /// would be worse than admitting it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub snippet: Option<String>,
     pub score: f32,
     pub vector_score: f32,
     pub keyword_score: f32,
