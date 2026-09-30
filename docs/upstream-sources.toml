@@ -27,7 +27,7 @@
 repository = "https://github.com/BloopAI/bloop"
 branch = "oss"
 commit = "431e9e82c5a293c40f22aadb3615c3aa387af82e"
-kind = "code"
+kind = "translated"
 role = ["code indexing", "semantic and literal search", "repository sync", "chunking"]
 license = "Apache-2.0; same licence as this product, so no relicense is needed"
 # Archived upstream, last commit 2024-12-04. That is a feature for a pin rather than a problem: the

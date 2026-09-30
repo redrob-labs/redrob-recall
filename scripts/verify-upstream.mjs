@@ -34,7 +34,12 @@ const noticesPath = join(root, "UPSTREAM_NOTICES.md");
 // `redistributed` is stronger than `library`: files we copy into our own build output and ship, so an
 // attribution or source obligation follows the BINARY rather than only the linking. A statically linked
 // Rust crate is in this class -- it is compiled into the executable we distribute.
-const KINDS = ["code", "algorithm", "library", "protocol", "redistributed"];
+// `translated` is validated exactly like `code` -- attribution, an exact pin, a declared boundary and an
+// inbound-compatible licence -- but it is a SEPARATE kind, because the two differ in what a reader must
+// then do. For `code` the re-sync method is a diff against the upstream file; for `translated` there is no
+// file to diff and behaviour is the only thing comparable. Calling both `code` sends the next reader
+// looking for a diff that cannot exist. redrob-canvas made the same distinction for its Krita work.
+const KINDS = ["code", "translated", "algorithm", "library", "protocol", "redistributed"];
 // PERMISSIVE ONLY, and this is where this file deliberately differs from redrob-query's otherwise
 // identical validator. That product is GPL-3.0-or-later and can absorb copyleft; this one is
 // Apache-2.0 and cannot. Copying GPL or LGPL source in here would force this whole product to GPL --
@@ -103,7 +108,7 @@ for (const [name, body] of sections) {
   // copying from a moving target is unreproducible, and so is comparing behaviour against "1.12 or
   // later". A `library` is legitimately pinned by `minimum_version` -- we link whatever the system or
   // registry provides at or above that floor, and no single commit describes it.
-  const exact = body.kind === "code" || body.kind === "algorithm";
+  const exact = body.kind === "code" || body.kind === "translated" || body.kind === "algorithm";
   if (body.commit) {
     if (!/^[0-9a-f]{40}$/.test(body.commit)) {
       problems.push(`${name}.commit is not a full 40-character sha: ${JSON.stringify(body.commit)}`);
@@ -143,11 +148,12 @@ for (const [name, body] of sections) {
     problems.push(`${name} declares no license`);
   }
 
-  if (body.kind !== "code") continue;
+  if (body.kind !== "code" && body.kind !== "translated") continue;
+  const kind = body.kind;
 
   const heading = new RegExp(`^##\\s+${name}\\s*$`, "im");
   if (!heading.test(notices)) {
-    problems.push(`${name}.kind is 'code' but UPSTREAM_NOTICES.md has no '## ${name}' section`);
+    problems.push(`${name}.kind is '${kind}' but UPSTREAM_NOTICES.md has no '## ${name}' section`);
   }
   if (body.commit && !notices.includes(body.commit)) {
     problems.push(
@@ -157,18 +163,18 @@ for (const [name, body] of sections) {
   }
   if (!body.boundary) {
     problems.push(
-      `${name}.kind is 'code' but it declares no boundary; say where copying stops`,
+      `${name}.kind is '${kind}' but it declares no boundary; say where taking stops`,
     );
   }
   if (body.license && COPYLEFT.test(body.license)) {
     problems.push(
-      `${name}.kind is 'code' and its license ${JSON.stringify(body.license)} is copyleft; this ` +
+      `${name}.kind is '${kind}' and its license ${JSON.stringify(body.license)} is copyleft; this ` +
         `product is Apache-2.0 and copying that source in would force the whole product to change ` +
         `licence. Relicense deliberately first, or take the upstream as 'algorithm' instead`,
     );
   } else if (body.license && !INBOUND_OK.test(body.license)) {
     problems.push(
-      `${name}.kind is 'code' but its license ${JSON.stringify(body.license)} is not recognised ` +
+      `${name}.kind is '${kind}' but its license ${JSON.stringify(body.license)} is not recognised ` +
         `as a permissive licence an Apache-2.0 product may absorb; audit it by hand and widen this ` +
         `check deliberately`,
     );
@@ -257,10 +263,14 @@ const byKind = (k) =>
 
 console.log(`upstream pins well-formed: ${sections.size} sources`);
 console.log(`  copied source (licence binds us): ${byKind("code")}`);
+console.log(`  reimplemented from upstream:      ${byKind("translated")}`);
 console.log(`  behaviour only (nothing copied):  ${byKind("algorithm")}`);
 // Every kind the schema accepts is printed. Until now this reported only two of the four in use, so the
 // qdrant library pin and the redrob_code protocol pin were invisible -- and the qdrant entry turned out
 // to name the wrong artefact at the wrong version, which is precisely what an unprinted line hides.
+// `translated` was added for the same reason the moment the kind existed: bloop moved into it and would
+// otherwise have disappeared from this summary while still being the one source the licence reasoning
+// depends on.
 console.log(`  linked, not copied:               ${byKind("library")}`);
 console.log(`  shipped in our binary:            ${byKind("redistributed")}`);
 console.log(`  spoken, not copied:               ${byKind("protocol")}`);
