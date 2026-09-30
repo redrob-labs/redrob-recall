@@ -145,6 +145,66 @@ if (problems.length > 0) {
   process.exit(1);
 }
 
+// The compatibility matrix names an Authority per row, and a row citing an upstream nobody
+// registered is how a roadmap starts describing work against a tree with no pin.
+//
+// The check reads the other way round than is tempting. Scanning the column for REGISTERED names and
+// complaining about what is missing catches nothing -- an unregistered name is, by construction, not
+// in the list being searched for, so the check passes on exactly the input it exists to reject. (That
+// is how it was written first; breaking the file on purpose is what exposed it.) So instead every row
+// must match a registered upstream OR one of these explicitly exempt authorities, and anything else
+// fails by name.
+const EXEMPT_AUTHORITY = [
+  /redrob-recall bounded scope/i, // our own scope, not an upstream gap
+  /none yet chosen/i, // an honest blank; becomes a real authority when one is picked
+  /Redrob design system/i, // internal delivery
+  /Redrob Console/i, // our own service
+  /redrob.code/i, // sibling product; its API doc is the authority
+  /fastembed|ONNX Runtime/i, // a Cargo dependency, inventoried in THIRD_PARTY_NOTICES.md
+];
+const matrixPath = join(root, "docs/compatibility.md");
+if (existsSync(matrixPath)) {
+  const matrix = readFileSync(matrixPath, "utf8");
+  const rows = matrix
+    .split("\n")
+    .filter((l) => l.startsWith("| ") && l.split("|").length > 5)
+    .filter((l) => !/^\|\s*-+\s*\|/.test(l) && !/\|\s*Authority\s*\|/.test(l));
+
+  const unknown = [];
+  for (const row of rows) {
+    const cells = row.split("|");
+    const authority = cells[3] ?? "";
+    const registered = [...sections.keys()].some((n) =>
+      new RegExp(`\\b${n}\\b`, "i").test(authority),
+    );
+    if (registered || EXEMPT_AUTHORITY.some((re) => re.test(authority))) continue;
+    unknown.push(`${(cells[2] ?? "").trim().slice(0, 48)} -> ${authority.trim().slice(0, 40)}`);
+  }
+  if (unknown.length > 0) {
+    console.error(
+      "error: compatibility.md rows name an authority that is neither a registered upstream in " +
+        "docs/upstream-sources.toml nor an exempt one:",
+    );
+    for (const u of unknown) console.error(`  ${u}`);
+    process.exit(1);
+  }
+
+  // No row may claim parity before a golden-output check exists to justify it. `native` means we
+  // have an implementation; `parity` means we matched the authority, and nothing here has ever run
+  // such a check. This is what stops the word drifting into the matrix by optimism.
+  const parity = rows.filter((r) => /\|\s*parity\s*\|?\s*$/.test(r));
+  if (parity.length > 0) {
+    console.error(
+      `error: ${parity.length} row(s) in compatibility.md claim 'parity', but no golden-output ` +
+        `harness exists in this repository yet. Build the harness first, or use 'native'.`,
+    );
+    process.exit(1);
+  }
+  console.log(
+    `compatibility matrix: ${rows.length} rows, every authority accounted for, 0 parity claims`,
+  );
+}
+
 const byKind = (k) =>
   [...sections]
     .filter(([, b]) => b.kind === k)

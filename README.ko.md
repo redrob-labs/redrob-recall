@@ -159,6 +159,8 @@ Redrob Recall은 [Apache License 2.0](LICENSE)으로 배포됩니다. [NOTICE](N
 ## 프로젝트 문서
 
 - [아키텍처와 신뢰 경계](docs/ARCHITECTURE.md)
+- [호환성 매트릭스](docs/compatibility.md) — 무엇이 구현됐고, 행마다 어느 정본이 기준이며, 무엇이 아직 계획인지
+- [정본 소스 고지](UPSTREAM_NOTICES.md)와 [docs/upstream-sources.toml](docs/upstream-sources.toml)의 핀
 - [서명된 릴리스 절차](docs/RELEASING.md)
 - [백업과 복구](docs/RECOVERY.md)
 - [릴리스 QA 체크리스트](docs/QA_CHECKLIST.md)
