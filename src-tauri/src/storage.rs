@@ -276,17 +276,20 @@ impl Storage {
         rows.collect::<Result<Vec<_>, _>>().map_err(Into::into)
     }
 
+    /// Keyword search over the FTS5 index.
+    ///
+    /// The query goes through `query::to_match_expression`, which parses the boolean operators,
+    /// brackets, phrases, field filters and exclusions a person types and compiles them to an FTS5
+    /// expression. Before that this function stripped every non-alphanumeric character, quoted each
+    /// remaining word and joined them with `OR`: a phrase was torn into its words, an exclusion was
+    /// silently dropped, and `heading:policy` searched for the literal word "heading".
+    ///
+    /// A malformed query is an ERROR rather than an empty result, and deliberately so -- "a quotation
+    /// mark is not closed" is something a person can act on, where zero results looks like the corpus
+    /// simply has nothing.
     pub fn keyword_search(&self, query: &str, limit: usize) -> Result<Vec<(u64, f32)>> {
-        let terms = query
-            .split(|ch: char| !ch.is_alphanumeric())
-            .filter(|term| term.chars().count() > 1)
-            .take(12)
-            .map(|term| format!("\"{}\"", term.replace('"', "")))
-            .collect::<Vec<_>>();
-        if terms.is_empty() {
-            return Ok(Vec::new());
-        }
-        let expression = terms.join(" OR ");
+        let columns: Vec<&str> = FTS_COLUMNS.iter().map(|(name, _)| *name).collect();
+        let expression = crate::query::to_match_expression(query, &columns)?;
         let connection = self.connection.lock();
         // The weights come from FTS_COLUMNS rather than being written here, because a literal list at
         // this call site is exactly what would drift when a column is added -- and SQLite accepts a
@@ -879,6 +882,87 @@ mod tests {
         let weights = expression.trim_end_matches(')').split(',').skip(1).count();
         assert_eq!(weights, super::FTS_COLUMNS.len());
         assert_eq!(super::fts_column_list(), "content, heading");
+    }
+
+    /// The query language reaching the index through the real search method.
+    ///
+    /// query.rs proves the compiler against a bare FTS5 table. This proves the product's own path uses
+    /// it -- the compiler existed and was unreachable until `keyword_search` called it.
+    #[test]
+    fn the_query_language_reaches_the_index() {
+        let path = temporary_database("query-language");
+        let storage = Storage::open(&path).unwrap();
+        seed_one_document(&storage);
+
+        let found = |query: &str| storage.keyword_search(query, 10).unwrap().len();
+
+        // Two words mean BOTH, not either. The old implementation ORed them, so this returned 2.
+        assert_eq!(found("revenue committee"), 1, "only chunk 0 has both");
+        assert_eq!(
+            found("revenue OR committee"),
+            2,
+            "either, when asked for either"
+        );
+
+        // A phrase stays whole. The old implementation split it into ORed words.
+        assert_eq!(found("\"quarterly figures\""), 1);
+        assert_eq!(
+            found("\"figures quarterly\""),
+            0,
+            "order matters in a phrase"
+        );
+
+        // A field filter scopes, where the old implementation searched for the word "heading".
+        assert_eq!(found("heading:appendix"), 1);
+        assert_eq!(
+            found("content:appendix"),
+            0,
+            "appendix is a heading, not body text"
+        );
+
+        // An exclusion excludes, where the old implementation dropped it.
+        assert_eq!(
+            found("recognition -appendix"),
+            1,
+            "the Appendix chunk is removed"
+        );
+
+        drop(storage);
+        std::fs::remove_dir_all(path.parent().unwrap()).unwrap();
+    }
+
+    /// A malformed query is an error carrying a sentence, not an empty result set.
+    #[test]
+    fn a_malformed_query_is_reported_rather_than_answered_with_nothing() {
+        let path = temporary_database("query-malformed");
+        let storage = Storage::open(&path).unwrap();
+        seed_one_document(&storage);
+
+        // Zero results would look like the corpus having nothing; the message says what to fix.
+        let error = storage
+            .keyword_search("\"unclosed", 10)
+            .unwrap_err()
+            .to_string();
+        assert!(error.contains("quotation mark"), "got {error}");
+
+        let unknown = storage
+            .keyword_search("author:someone", 10)
+            .unwrap_err()
+            .to_string();
+        assert!(
+            unknown.contains("content, heading"),
+            "names the searchable fields: {unknown}"
+        );
+
+        // And an unknown field never reaches SQLite, which would answer with its own error naming the
+        // column -- the searchable field list comes from FTS_COLUMNS, so the two cannot disagree.
+        assert!(
+            unknown.contains("author"),
+            "names what was wrong: {unknown}"
+        );
+
+        drop(storage);
+        std::fs::remove_dir_all(path.parent().unwrap()).unwrap();
     }
 
     /// Insert one document whose heading carries a term its body does not.

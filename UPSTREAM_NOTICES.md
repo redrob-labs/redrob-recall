@@ -40,7 +40,20 @@ than what was planned.
 
 | Subsystem | Upstream path | Our path | Landed |
 |---|---|---|---|
-| _(none yet)_ | | | |
+| _(no copied source yet)_ | | | |
+
+**The query language is REIMPLEMENTED, not copied, which is why the table above is still empty.**
+`src-tauri/src/query.rs` answers the same question bloop's `query/grammar.pest` answers -- what does a
+person's search string mean -- and shares no code with it. bloop parses with pest into a Tantivy query;
+this is a hand-written tokeniser and recursive-descent parser producing an FTS5 `MATCH` expression. The
+grammar it implements is a reduced version of bloop's, and the reductions are recorded in
+`docs/compatibility.md`: `regex` is out of scope because FTS5 cannot walk a term dictionary, and
+`repo:`, `org:`, `branch:`, `symbol:` and `open:` have no meaning in a product that searches a folder of
+documents rather than git repositories.
+
+Reading a grammar to learn what a feature means is not copying, and bloop's Apache-2.0 licence would
+permit the copying anyway -- this entry exists so the distinction is on the record rather than inferred
+from an empty table.
 
 ### Boundary
 

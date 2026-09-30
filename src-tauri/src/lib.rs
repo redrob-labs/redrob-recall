@@ -3,6 +3,7 @@ mod embedding;
 mod indexer;
 mod local_api;
 mod models;
+mod query;
 mod redrob;
 mod search;
 mod state;

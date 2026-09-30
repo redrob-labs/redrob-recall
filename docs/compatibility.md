@@ -27,7 +27,7 @@ authority are our own bounded scope and are not upstream gaps.
 | Retrieval | embedded vector search | Qdrant Edge | `qdrant_edge` shard | native |
 | Retrieval | hybrid fusion of keyword and vector results | bloop `semantic`/`snippet` | reciprocal rank fusion, k=60 | native |
 | Retrieval | extension and path-prefix filters | redrob-recall bounded scope | post-fusion filter | native |
-| Retrieval | query language: boolean, grouping, phrases, column filters | bloop `query/grammar.pest` + `query/planner` | parser ported onto FTS5 `MATCH`; decided in `docs/index-engine-decision.md` | planned |
+| Retrieval | query language: boolean, grouping, phrases, field filters, exclusions, prefix | bloop `query/grammar.pest` + `query/planner` | `src-tauri/src/query.rs` — hand-written parser to an AST, compiled to FTS5 `MATCH`. A malformed query is a reported error, never an empty result. 38 hostile inputs are executed against real FTS5 to prove no input compiles to something it rejects | native |
 | Retrieval | regex literal search | bloop `query/grammar.pest` | **out of scope** — FTS5 is a tokenised index and this product searches prose; reopens if source code is ever indexed | planned |
 | Retrieval | `heading` as an indexed FTS5 column | redrob-recall bounded scope | schema 3; `chunks_fts` indexes `content, heading` with bm25 weights 1.0 and 2.0. Migration drops and rebuilds the index, which is lossless only because it is an external-content table | native |
 | Retrieval | document `name`/`path` as indexed FTS5 columns | redrob-recall bounded scope | still **planned**, and it is a bigger change than `heading` was: those live in `documents`, not `chunks`, so an external-content index cannot reach them without denormalising a copy into every chunk row | planned |
