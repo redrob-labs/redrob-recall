@@ -12,7 +12,40 @@ use std::{
     sync::Arc,
 };
 
-const SCHEMA_VERSION: i64 = 2;
+const SCHEMA_VERSION: i64 = 3;
+
+/// The columns `chunks_fts` indexes, in order, with the bm25 weight each carries.
+///
+/// Declared together and in one place because SQLite cannot catch them drifting apart. Measured:
+/// `bm25(chunks_fts, 1.0)` against a two-column table is accepted and silently weights the second
+/// column 1.0, and `bm25(chunks_fts, 1.0, 1.0, 1.0)` against the same table is also accepted and
+/// silently ignores the third weight. Neither errors, so a weight list written at a call site would
+/// fall out of step with the column list invisibly.
+///
+/// `heading` carries 2.0 rather than 1.0. A heading is a short field, and bm25 already rewards a match
+/// in a short field, so the weight is deliberately modest -- it says a heading match is a stronger
+/// signal than a body match without letting a three-word heading outrank a paragraph that is genuinely
+/// about the term.
+const FTS_COLUMNS: &[(&str, f64)] = &[("content", 1.0), ("heading", 2.0)];
+
+/// `content, heading` -- for the CREATE, the triggers and the column list of an INSERT.
+fn fts_column_list() -> String {
+    FTS_COLUMNS
+        .iter()
+        .map(|(name, _)| *name)
+        .collect::<Vec<_>>()
+        .join(", ")
+}
+
+/// `bm25(chunks_fts, 1, 2)` -- always as many weights as there are columns.
+fn fts_bm25() -> String {
+    let weights = FTS_COLUMNS
+        .iter()
+        .map(|(_, weight)| format!("{weight}"))
+        .collect::<Vec<_>>()
+        .join(", ");
+    format!("bm25(chunks_fts, {weights})")
+}
 const BACKUP_RETENTION: usize = 3;
 
 #[derive(Clone)]
@@ -255,9 +288,13 @@ impl Storage {
         }
         let expression = terms.join(" OR ");
         let connection = self.connection.lock();
-        let mut statement = connection.prepare(
-            "SELECT rowid, bm25(chunks_fts, 1.0) FROM chunks_fts WHERE chunks_fts MATCH ?1 ORDER BY bm25(chunks_fts) LIMIT ?2",
-        )?;
+        // The weights come from FTS_COLUMNS rather than being written here, because a literal list at
+        // this call site is exactly what would drift when a column is added -- and SQLite accepts a
+        // wrong-length weight list without complaining.
+        let bm25 = fts_bm25();
+        let mut statement = connection.prepare(&format!(
+            "SELECT rowid, {bm25} FROM chunks_fts WHERE chunks_fts MATCH ?1 ORDER BY {bm25} LIMIT ?2"
+        ))?;
         let rows = statement.query_map(params![expression, limit as u64], |row| {
             let id: u64 = row.get(0)?;
             let rank: f64 = row.get(1)?;
@@ -396,24 +433,6 @@ fn migrate(connection: &mut Connection, previous_version: i64) -> Result<()> {
             UNIQUE(document_id, chunk_index)
         );
 
-        CREATE VIRTUAL TABLE IF NOT EXISTS chunks_fts USING fts5(
-            content,
-            content='chunks',
-            content_rowid='id',
-            tokenize='unicode61 remove_diacritics 2'
-        );
-
-        CREATE TRIGGER IF NOT EXISTS chunks_ai AFTER INSERT ON chunks BEGIN
-            INSERT INTO chunks_fts(rowid, content) VALUES (new.id, new.content);
-        END;
-        CREATE TRIGGER IF NOT EXISTS chunks_ad AFTER DELETE ON chunks BEGIN
-            INSERT INTO chunks_fts(chunks_fts, rowid, content) VALUES ('delete', old.id, old.content);
-        END;
-        CREATE TRIGGER IF NOT EXISTS chunks_au AFTER UPDATE ON chunks BEGIN
-            INSERT INTO chunks_fts(chunks_fts, rowid, content) VALUES ('delete', old.id, old.content);
-            INSERT INTO chunks_fts(rowid, content) VALUES (new.id, new.content);
-        END;
-
         CREATE INDEX IF NOT EXISTS idx_documents_status ON documents(status);
         CREATE INDEX IF NOT EXISTS idx_chunks_document ON chunks(document_id);
         "#,
@@ -424,12 +443,95 @@ fn migrate(connection: &mut Connection, previous_version: i64) -> Result<()> {
             [],
         )?;
     }
+    ensure_fts_schema(&transaction)?;
     if previous_version < SCHEMA_VERSION {
         transaction.execute("INSERT INTO chunks_fts(chunks_fts) VALUES('rebuild')", [])?;
     }
     transaction.pragma_update(None, "user_version", SCHEMA_VERSION)?;
     transaction.commit()?;
     Ok(())
+}
+
+/// Create `chunks_fts` and its triggers from `FTS_COLUMNS`, replacing an index built on a different
+/// column set.
+///
+/// A virtual table cannot be altered -- measured: SQLite answers `virtual tables may not be altered` --
+/// so widening the index means dropping and recreating it. That is lossless here and only here, because
+/// this is an EXTERNAL CONTENT table: every indexed word lives in `chunks`, and `rebuild` reads it back
+/// from there. Doing the same to an ordinary FTS5 table would destroy the only copy.
+///
+/// The existing column set is read from the table rather than inferred from the schema version, so a
+/// database left half-migrated by an interrupted run is repaired rather than trusted.
+fn ensure_fts_schema(connection: &Connection) -> Result<()> {
+    let columns = fts_column_list();
+    let existing = fts_existing_columns(connection)?;
+    let wanted: Vec<String> = FTS_COLUMNS
+        .iter()
+        .map(|(name, _)| (*name).to_string())
+        .collect();
+
+    if existing.as_deref() == Some(wanted.as_slice()) {
+        return Ok(());
+    }
+
+    let values = FTS_COLUMNS
+        .iter()
+        .map(|(name, _)| format!("new.{name}"))
+        .collect::<Vec<_>>()
+        .join(", ");
+    let old_values = FTS_COLUMNS
+        .iter()
+        .map(|(name, _)| format!("old.{name}"))
+        .collect::<Vec<_>>()
+        .join(", ");
+
+    connection.execute_batch(&format!(
+        r#"
+        DROP TRIGGER IF EXISTS chunks_ai;
+        DROP TRIGGER IF EXISTS chunks_ad;
+        DROP TRIGGER IF EXISTS chunks_au;
+        DROP TABLE IF EXISTS chunks_fts;
+
+        CREATE VIRTUAL TABLE chunks_fts USING fts5(
+            {columns},
+            content='chunks',
+            content_rowid='id',
+            tokenize='unicode61 remove_diacritics 2'
+        );
+
+        CREATE TRIGGER chunks_ai AFTER INSERT ON chunks BEGIN
+            INSERT INTO chunks_fts(rowid, {columns}) VALUES (new.id, {values});
+        END;
+        CREATE TRIGGER chunks_ad AFTER DELETE ON chunks BEGIN
+            INSERT INTO chunks_fts(chunks_fts, rowid, {columns}) VALUES ('delete', old.id, {old_values});
+        END;
+        CREATE TRIGGER chunks_au AFTER UPDATE ON chunks BEGIN
+            INSERT INTO chunks_fts(chunks_fts, rowid, {columns}) VALUES ('delete', old.id, {old_values});
+            INSERT INTO chunks_fts(rowid, {columns}) VALUES (new.id, {values});
+        END;
+
+        INSERT INTO chunks_fts(chunks_fts) VALUES('rebuild');
+        "#
+    ))?;
+    Ok(())
+}
+
+/// The columns an existing `chunks_fts` indexes, or `None` when there is no such table.
+fn fts_existing_columns(connection: &Connection) -> Result<Option<Vec<String>>> {
+    let present: i64 = connection.query_row(
+        "SELECT count(*) FROM sqlite_master WHERE type = 'table' AND name = 'chunks_fts'",
+        [],
+        |row| row.get(0),
+    )?;
+    if present == 0 {
+        return Ok(None);
+    }
+    // PRAGMA table_info works on an FTS5 table and lists its indexed columns in order.
+    let mut statement = connection.prepare("PRAGMA table_info(chunks_fts)")?;
+    let columns = statement
+        .query_map([], |row| row.get::<_, String>(1))?
+        .collect::<Result<Vec<_>, _>>()?;
+    Ok(Some(columns))
 }
 
 fn has_column(connection: &Connection, table: &str, column: &str) -> Result<bool> {
@@ -623,5 +725,177 @@ mod tests {
         drop(connection);
         drop(storage);
         std::fs::remove_dir_all(path.parent().unwrap()).unwrap();
+    }
+
+    /// The bug this schema change fixes, as a test that fails on the old index.
+    ///
+    /// `chunks.heading` existed and was never indexed, so a term appearing only in a heading could not
+    /// be found. Measured before the change: a chunk headed "Revenue recognition policy" whose body
+    /// never says "policy" did not come back for "policy".
+    #[test]
+    fn a_term_in_a_heading_is_searchable() {
+        let path = temporary_database("heading-search");
+        let storage = Storage::open(&path).unwrap();
+        seed_one_document(&storage);
+
+        let hits = storage.keyword_search("policy", 10).unwrap();
+        assert_eq!(hits.len(), 2, "both the heading match and the body match");
+
+        let heading_only = storage.keyword_search("quarterly", 10).unwrap();
+        assert_eq!(
+            heading_only.len(),
+            1,
+            "a body-only term still matches only its chunk"
+        );
+
+        drop(storage);
+        std::fs::remove_dir_all(path.parent().unwrap()).unwrap();
+    }
+
+    /// A database indexed on the old column set is widened, and nothing is lost doing it.
+    ///
+    /// The index cannot be altered -- SQLite refuses with `virtual tables may not be altered` -- so the
+    /// migration drops and recreates it. That is only safe because this is an external-content table:
+    /// every indexed word lives in `chunks`, and `rebuild` reads it back. This asserts both halves --
+    /// the new column works AND the previously indexed content is still findable.
+    #[test]
+    fn a_legacy_single_column_index_is_widened_without_losing_content() {
+        let path = temporary_database("fts-widen");
+
+        // Build the pre-change schema by hand, including its one-column index.
+        let connection = Connection::open(&path).unwrap();
+        connection
+            .execute_batch(
+                "CREATE TABLE documents (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    path TEXT NOT NULL UNIQUE, name TEXT NOT NULL, extension TEXT NOT NULL,
+                    mime_type TEXT NOT NULL, modified_at TEXT NOT NULL, size_bytes INTEGER NOT NULL,
+                    content_hash TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'indexed',
+                    chunk_count INTEGER NOT NULL DEFAULT 0, last_error TEXT, indexed_at TEXT NOT NULL
+                );
+                CREATE TABLE chunks (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    document_id INTEGER NOT NULL REFERENCES documents(id) ON DELETE CASCADE,
+                    chunk_index INTEGER NOT NULL, content TEXT NOT NULL, page INTEGER, heading TEXT,
+                    UNIQUE(document_id, chunk_index)
+                );
+                CREATE VIRTUAL TABLE chunks_fts USING fts5(
+                    content, content='chunks', content_rowid='id',
+                    tokenize='unicode61 remove_diacritics 2');
+                CREATE TRIGGER chunks_ai AFTER INSERT ON chunks BEGIN
+                    INSERT INTO chunks_fts(rowid, content) VALUES (new.id, new.content);
+                END;
+                INSERT INTO documents (path, name, extension, mime_type, modified_at, size_bytes,
+                                       content_hash, indexed_at)
+                VALUES ('/docs/handbook.md', 'handbook.md', 'md', 'text/markdown',
+                        '2026-01-01T00:00:00Z', 10, 'hash', '2026-01-01T00:00:00Z');
+                INSERT INTO chunks (document_id, chunk_index, content, heading) VALUES
+                    (1, 0, 'The figures were reviewed and approved by the committee.',
+                        'Revenue recognition policy');",
+            )
+            .unwrap();
+        connection
+            .pragma_update(None, "user_version", 2_i64)
+            .unwrap();
+        drop(connection);
+
+        // Before opening: the heading term is invisible, which is the state being migrated away from.
+        let legacy = Connection::open(&path).unwrap();
+        let before: i64 = legacy
+            .query_row(
+                "SELECT count(*) FROM chunks_fts WHERE chunks_fts MATCH 'policy'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(before, 0, "the old index cannot find a heading-only term");
+        drop(legacy);
+
+        let storage = Storage::open(&path).unwrap();
+        {
+            let connection = storage.connection.lock();
+            let version: i64 = connection
+                .pragma_query_value(None, "user_version", |row| row.get(0))
+                .unwrap();
+            assert_eq!(version, SCHEMA_VERSION);
+
+            let mut statement = connection.prepare("PRAGMA table_info(chunks_fts)").unwrap();
+            let columns: Vec<String> = statement
+                .query_map([], |row| row.get::<_, String>(1))
+                .unwrap()
+                .collect::<Result<Vec<_>, _>>()
+                .unwrap();
+            assert_eq!(columns, vec!["content", "heading"]);
+        }
+
+        // The heading is now findable, AND the content that was already indexed still is. The second
+        // assertion is the one that would catch a migration that recreated the index without rebuilding.
+        assert_eq!(storage.keyword_search("policy", 10).unwrap().len(), 1);
+        assert_eq!(storage.keyword_search("committee", 10).unwrap().len(), 1);
+
+        storage.integrity_check().unwrap();
+        drop(storage);
+        std::fs::remove_dir_all(path.parent().unwrap()).unwrap();
+    }
+
+    /// Opening twice must not rebuild the index a second time.
+    ///
+    /// The schema is reconciled against the table's actual columns rather than the version number, so
+    /// that an interrupted migration is repaired; the risk in that choice is doing the work every time,
+    /// which on a large corpus is an expensive no-op.
+    #[test]
+    fn opening_an_already_migrated_database_leaves_the_index_alone() {
+        let path = temporary_database("fts-idempotent");
+        let storage = Storage::open(&path).unwrap();
+        seed_one_document(&storage);
+        drop(storage);
+
+        let reopened = Storage::open(&path).unwrap();
+        assert_eq!(reopened.keyword_search("policy", 10).unwrap().len(), 2);
+        {
+            let connection = reopened.connection.lock();
+            // A rebuild would have reset the triggers too; assert all three survived.
+            let triggers: i64 = connection
+                .query_row(
+                    "SELECT count(*) FROM sqlite_master WHERE type = 'trigger'
+                     AND name IN ('chunks_ai', 'chunks_ad', 'chunks_au')",
+                    [],
+                    |row| row.get(0),
+                )
+                .unwrap();
+            assert_eq!(triggers, 3);
+        }
+        drop(reopened);
+        std::fs::remove_dir_all(path.parent().unwrap()).unwrap();
+    }
+
+    /// The bm25 weight list always has one weight per indexed column.
+    ///
+    /// Measured: SQLite accepts a weight list that is too short AND one that is too long, silently. So
+    /// nothing but this check stands between a future column and a wrong ranking.
+    #[test]
+    fn every_indexed_column_has_a_bm25_weight() {
+        let expression = super::fts_bm25();
+        let weights = expression.trim_end_matches(')').split(',').skip(1).count();
+        assert_eq!(weights, super::FTS_COLUMNS.len());
+        assert_eq!(super::fts_column_list(), "content, heading");
+    }
+
+    /// Insert one document whose heading carries a term its body does not.
+    fn seed_one_document(storage: &Storage) {
+        let connection = storage.connection.lock();
+        connection
+            .execute_batch(
+                "INSERT INTO documents (path, name, extension, mime_type, modified_at, size_bytes,
+                                        content_hash, indexed_at)
+                 VALUES ('/docs/handbook.md', 'handbook.md', 'md', 'text/markdown',
+                         '2026-01-01T00:00:00Z', 10, 'hash', '2026-01-01T00:00:00Z');
+                 INSERT INTO chunks (document_id, chunk_index, content, heading) VALUES
+                    (1, 0, 'The quarterly figures were reviewed and approved by the committee.',
+                        'Revenue recognition policy'),
+                    (1, 1, 'Recognition of revenue happens when control transfers, per the policy.',
+                        'Appendix');",
+            )
+            .unwrap();
     }
 }

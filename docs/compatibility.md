@@ -29,7 +29,8 @@ authority are our own bounded scope and are not upstream gaps.
 | Retrieval | extension and path-prefix filters | redrob-recall bounded scope | post-fusion filter | native |
 | Retrieval | query language: boolean, grouping, phrases, column filters | bloop `query/grammar.pest` + `query/planner` | parser ported onto FTS5 `MATCH`; decided in `docs/index-engine-decision.md` | planned |
 | Retrieval | regex literal search | bloop `query/grammar.pest` | **out of scope** — FTS5 is a tokenised index and this product searches prose; reopens if source code is ever indexed | planned |
-| Retrieval | `heading` and `path` as indexed FTS5 columns | redrob-recall bounded scope | schema change — today `chunks_fts` indexes only `content`, so a document whose TITLE matches does not come back | planned |
+| Retrieval | `heading` as an indexed FTS5 column | redrob-recall bounded scope | schema 3; `chunks_fts` indexes `content, heading` with bm25 weights 1.0 and 2.0. Migration drops and rebuilds the index, which is lossless only because it is an external-content table | native |
+| Retrieval | document `name`/`path` as indexed FTS5 columns | redrob-recall bounded scope | still **planned**, and it is a bigger change than `heading` was: those live in `documents`, not `chunks`, so an external-content index cannot reach them without denormalising a copy into every chunk row | planned |
 | Retrieval | stopword handling and ranking tuned per query kind | bloop `query/ranking`, `query/stopwords` | not started | planned |
 | Retrieval | result snippet selection with context lines | bloop `snippet` | whole chunk returned today | planned |
 | Code intelligence | symbol definitions and references, scope resolution | bloop `intelligence/scope_resolution` (53 files) | not started | planned |
