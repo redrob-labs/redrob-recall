@@ -16,6 +16,7 @@ import { createHash } from "node:crypto";
 import { readdirSync, readFileSync, statSync } from "node:fs";
 import { join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
+import { findInkOnGroundCollisions } from "./ink-on-ground.mjs";
 
 const ROOT = join(fileURLToPath(new URL(".", import.meta.url)), "..");
 const failures = [];
@@ -35,7 +36,7 @@ const rel = (f) => relative(ROOT, f);
 
 // 1. Colour literals. The token imports at the top of a sheet are the only place a colour may be
 //    named, and they name a file, not a value.
-const COLOUR = /#[0-9a-fA-F]{3,8}\b|\brgba?\(\s*\d/g;
+const COLOUR = /#[0-9a-fA-F]{3,8}\b|\brgba?\(\s*\d|:\s*(?:white|black)\b/g;
 for (const file of files.filter((f) => f.endsWith(".css"))) {
   readFileSync(file, "utf8")
     .split("\n")
@@ -96,11 +97,21 @@ for (const file of files.filter((f) => f.endsWith(".css"))) {
     .forEach((line, i) => {
       const m = /font-family:\s*([^;]+);/.exec(line);
       if (!m) return;
-      if (/^var\(--font-(sans|sans-kr|sans-hi|mono|display)\)$/.test(m[1].trim())) return;
+      if (/^(inherit|var\(--font-(sans|sans-kr|sans-hi|mono|serif|serif-kr|serif-display|display)\))$/.test(m[1].trim())) return;
       failures.push(
         `${rel(file)}:${i + 1} font-family ${m[1].trim()} -- use var(--font-sans) or another font token`,
       );
     });
+}
+
+// 5. Ink that cannot be read on its own ground, in either theme. See ink-on-ground.mjs for why this is
+//    a check rather than a review: a class that sits on both grounds is right in one screen and
+//    invisible in the other, and a screenshot only shows the screen you rendered.
+for (const problem of findInkOnGroundCollisions(
+  files.filter((f) => f.endsWith(".css")),
+  join(ROOT, "node_modules/@redrob-labs/ui/dist/styles/tokens.json"),
+)) {
+  failures.push(problem);
 }
 
 if (failures.length) {

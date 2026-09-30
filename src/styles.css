@@ -33,7 +33,7 @@
   --brand-dark: var(--action-primary-hover);
   --brand-soft: var(--surface-brand-subtle);
   --green: var(--status-success);
-  --green-soft: var(--accent-green-1);
+  --green-soft: color-mix(in oklab, var(--status-success) 16%, var(--surface-raised));
   --amber: var(--status-warning);
 }
 
@@ -613,8 +613,8 @@ kbd {
   height: 44px;
   flex: none;
   border-radius: 10px;
-  color: var(--ink-primary);
-  background: var(--ink);
+  color: var(--ink-on-brand);
+  background: var(--action-primary);
 }
 .search-submit:hover:not(:disabled) {
   background: var(--surface-base);
@@ -1204,7 +1204,7 @@ kbd {
   place-items: center;
   border-radius: 6px;
   color: var(--ink-on-brand);
-  background: var(--ink);
+  background: var(--action-primary);
   font-size: 9px;
   font-weight: 800;
 }
