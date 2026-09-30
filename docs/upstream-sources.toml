@@ -1,0 +1,64 @@
+# Pinned upstream specifications. Update only with compatibility review.
+#
+# Same schema as redrob-canvas and redrob-query, deliberately: three products read from upstream
+# authorities and they should not each invent their own vocabulary for it.
+#
+# `kind` is the load-bearing field, and scripts/verify-upstream.mjs checks it:
+#
+#   code       Source code is COPIED into this repository, file by file. The upstream licence
+#              therefore binds our distribution. Every such source needs an attribution entry in
+#              UPSTREAM_NOTICES.md recording its pinned commit, and a `boundary` saying where
+#              copying stops.
+#   algorithm  Read for behaviour and results. Nothing is copied. We reimplement and compare. No
+#              copyright obligation follows from reading, so these entries are a reproducibility
+#              record, not a licence claim.
+#   library    Linked or embedded as a dependency, not copied. Licence binds distribution of the
+#              dependency, not our source.
+#   protocol   A wire format or API we speak. Nothing is copied and nothing is linked.
+#
+# THE INBOUND DIRECTION HERE IS THE OPPOSITE OF redrob-query'S, and the validator differs
+# accordingly. This product is Apache-2.0, which is permissive, so it can absorb permissive source
+# only. A GPL `code` source would force this product to GPL -- the same one-way door redrob-query
+# walked through on purpose for Beekeeper Studio. Here there is no reason to, so copying GPL source
+# into this repository is refused rather than merely discouraged. Copying the query validator's
+# regex across would have silently allowed exactly that.
+
+[bloop]
+repository = "https://github.com/BloopAI/bloop"
+branch = "oss"
+commit = "431e9e82c5a293c40f22aadb3615c3aa387af82e"
+kind = "code"
+role = ["code indexing", "semantic and literal search", "repository sync", "chunking"]
+license = "Apache-2.0; same licence as this product, so no relicense is needed"
+# Archived upstream, last commit 2024-12-04. That is a feature for a pin rather than a problem: the
+# tree cannot move under us, and Apache-2.0 source stays usable regardless of whether anyone
+# maintains it. What it does mean is that no upstream fix is coming, so anything we take we own.
+#
+# Ships a single root LICENSE and no NOTICE file (verified: one path matching
+# /licen[sc]e|notice|copying/i in the pinned tree), so Apache section 4(d) imposes no propagation
+# duty -- the same position redrob-canvas is in with Graphite.
+#
+# OPEN DECISION, recorded here because the boundary depends on it: bloop indexes with Tantivy and
+# this product uses SQLite FTS5. Both then use Qdrant for vectors. Taking bloop's index layer
+# wholesale would leave two full-text indexes in one product, which is a correctness problem before
+# it is a size problem -- two indexes disagree, and the disagreement surfaces as search results that
+# depend on which path answered. That decision is item 1b.0 of the porting plan and is not made here.
+boundary = "index storage layer is undecided (Tantivy vs the existing SQLite FTS5); take search and chunking first, storage only after item 1b.0 is settled"
+
+[qdrant]
+repository = "https://github.com/qdrant/qdrant"
+minimum_version = "1.12"
+kind = "library"
+role = ["embedded vector search"]
+license = "Apache-2.0; embedded as Qdrant Edge, not copied"
+# Already shipped. Recorded here so the registry describes the whole upstream surface rather than
+# only the parts that are new. Attribution and the trademark statement are in NOTICE.
+
+[redrob_code]
+repository = "https://github.com/redrob-labs/redrob-code"
+tag = "v0.1.0"
+commit = "0a144f3b719d1f0de9101747327276507ad68ba3"
+kind = "protocol"
+role = ["Redrob API protocol", "device authorization", "streaming tool calls", "model discovery"]
+# A tag and the commit it points at. A bare commit reachable only from a deleted ref does not
+# survive, and this engine deleted every tag in its repository once when it reset its version line.
