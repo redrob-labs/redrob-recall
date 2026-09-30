@@ -27,7 +27,9 @@ authority are our own bounded scope and are not upstream gaps.
 | Retrieval | embedded vector search | Qdrant Edge | `qdrant_edge` shard | native |
 | Retrieval | hybrid fusion of keyword and vector results | bloop `semantic`/`snippet` | reciprocal rank fusion, k=60 | native |
 | Retrieval | extension and path-prefix filters | redrob-recall bounded scope | post-fusion filter | native |
-| Retrieval | query language: literal, regex, path and language filters, boolean | bloop `query/grammar.pest` + `query/planner` | not started | planned |
+| Retrieval | query language: boolean, grouping, phrases, column filters | bloop `query/grammar.pest` + `query/planner` | parser ported onto FTS5 `MATCH`; decided in `docs/index-engine-decision.md` | planned |
+| Retrieval | regex literal search | bloop `query/grammar.pest` | **out of scope** — FTS5 is a tokenised index and this product searches prose; reopens if source code is ever indexed | planned |
+| Retrieval | `heading` and `path` as indexed FTS5 columns | redrob-recall bounded scope | schema change — today `chunks_fts` indexes only `content`, so a document whose TITLE matches does not come back | planned |
 | Retrieval | stopword handling and ranking tuned per query kind | bloop `query/ranking`, `query/stopwords` | not started | planned |
 | Retrieval | result snippet selection with context lines | bloop `snippet` | whole chunk returned today | planned |
 | Code intelligence | symbol definitions and references, scope resolution | bloop `intelligence/scope_resolution` (53 files) | not started | planned |
@@ -78,6 +80,8 @@ our own filters, and BM25 parameters are FTS5 arguments. Against that, Tantivy a
 disk that FTS5 already covers, a second thing for `create_backup` and `integrity_check` to keep
 consistent, and a migration for existing libraries.
 
-The decision therefore looks like: **keep FTS5, port the query language and ranking on top of it**.
-That is item 1b.0 of the porting plan and is recorded there, not settled here — but it is recorded as
-a leaning with its reasons, rather than as an open question with none.
+**DECIDED: keep FTS5, port the query language and ranking on top of it.** Item 1b.0, settled by
+running every feature of bloop's grammar against FTS5 rather than by reasoning about it. Exactly one
+feature is out of reach — regex — and that is a code-search need rather than a document-search one.
+The full evidence, including a gap the reading found that was not in the plan, is in
+`docs/index-engine-decision.md`.

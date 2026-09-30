@@ -38,12 +38,28 @@ license = "Apache-2.0; same licence as this product, so no relicense is needed"
 # /licen[sc]e|notice|copying/i in the pinned tree), so Apache section 4(d) imposes no propagation
 # duty -- the same position redrob-canvas is in with Graphite.
 #
-# OPEN DECISION, recorded here because the boundary depends on it: bloop indexes with Tantivy and
-# this product uses SQLite FTS5. Both then use Qdrant for vectors. Taking bloop's index layer
-# wholesale would leave two full-text indexes in one product, which is a correctness problem before
-# it is a size problem -- two indexes disagree, and the disagreement surfaces as search results that
-# depend on which path answered. That decision is item 1b.0 of the porting plan and is not made here.
-boundary = "index storage layer is undecided (Tantivy vs the existing SQLite FTS5); take search and chunking first, storage only after item 1b.0 is settled"
+# DECIDED (item 1b.0, docs/index-engine-decision.md): FTS5 STAYS. Tantivy is not adopted.
+#
+# Tested rather than argued. Every feature of bloop's query/grammar.pest was run against FTS5:
+# implicit AND, explicit or, grouping, phrases and column filters all work, and FTS5 additionally
+# has NOT, NEAR and prefix matching which bloop's grammar does not. Exactly ONE feature is out of
+# reach -- regex -- because FTS5 is a tokenised inverted index and a regex needs the term dictionary
+# walked. bloop needs that because developers grep CODE; this product indexes PDF, DOCX, HTML and
+# prose, and lists source code as `planned`. If it ever indexes code the question reopens honestly.
+#
+# Four of bloop's labels do not apply at all: repo:, org: and branch: are git concepts, and symbol:
+# needs code intelligence. path: is not an FTS5 term and does not need to be -- search.rs already
+# filters by path prefix in SQL after fusion.
+#
+# Found while reading, and NOT in the plan: chunks_fts indexes ONE column. `content='chunks'` is an
+# external-content option, not a column. So a document whose TITLE matches a search does not come
+# back unless the words are also in its body, and heading:/path: filters have nothing to filter on.
+# That is a user-visible gap in a document search tool and it has nothing to do with Tantivy: part
+# of the case for a "richer query language" is a case for using FTS5 properly.
+#
+# So 1b.3 takes bloop's query parser, planner shape, ranking, stopwords and snippet selection, and
+# targets FTS5 MATCH. It does not take the index.
+boundary = "take the query language, ranking and snippet selection; do NOT take the Tantivy index -- decided in docs/index-engine-decision.md"
 
 [qdrant]
 repository = "https://github.com/qdrant/qdrant"
