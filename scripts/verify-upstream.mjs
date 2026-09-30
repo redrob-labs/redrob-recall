@@ -31,7 +31,10 @@ const root = join(dirname(fileURLToPath(import.meta.url)), "..");
 const pinsPath = join(root, "docs/upstream-sources.toml");
 const noticesPath = join(root, "UPSTREAM_NOTICES.md");
 
-const KINDS = ["code", "algorithm", "library", "protocol"];
+// `redistributed` is stronger than `library`: files we copy into our own build output and ship, so an
+// attribution or source obligation follows the BINARY rather than only the linking. A statically linked
+// Rust crate is in this class -- it is compiled into the executable we distribute.
+const KINDS = ["code", "algorithm", "library", "protocol", "redistributed"];
 // PERMISSIVE ONLY, and this is where this file deliberately differs from redrob-query's otherwise
 // identical validator. That product is GPL-3.0-or-later and can absorb copyleft; this one is
 // Apache-2.0 and cannot. Copying GPL or LGPL source in here would force this whole product to GPL --
@@ -70,6 +73,20 @@ for (const line of pins.split("\n")) {
   if (pair) sections.get(current)[pair[1]] = pair[2];
 }
 
+// A section this reader cannot see is worse than a malformed one, because nothing complains. Measured
+// in canvas's copy of this registry on 2026-09-30: `[lcms2]repository = "..."` put the header and its
+// first key on one line, so a header pattern requiring the header alone on its line skipped the entire
+// section -- its kind, licence and version pin were never checked, it appeared in no report, and the
+// file was not valid TOML at all. Same reader shape here, so the same guard.
+const declared = [...pins.matchAll(/^\[(\w+)\]/gm)].map((match) => match[1]);
+const unparsed = declared.filter((name) => !sections.has(name));
+if (unparsed.length) {
+  problems.push(
+    `these sections are declared but could not be parsed: ${unparsed.join(", ")}` +
+      " -- the section header must be alone on its line",
+  );
+}
+
 const required = ["bloop"];
 for (const name of required) {
   if (!sections.has(name)) problems.push(`[${name}] section is missing`);
@@ -93,8 +110,26 @@ for (const [name, body] of sections) {
     }
   } else if (exact) {
     problems.push(`${name}.kind is ${JSON.stringify(body.kind)} so it must pin an exact commit`);
-  } else if (!body.minimum_version) {
-    problems.push(`${name} pins neither a commit nor a minimum_version`);
+  } else if (!body.minimum_version && !body.version) {
+    // `version` is the redistributed kind's pin, `minimum_version` the library kind's floor.
+    problems.push(`${name} pins neither a commit, a version, nor a minimum_version`);
+  }
+
+  if (body.kind === "redistributed") {
+    // An attribution obligation attaches to ONE build, so a floor like ">= 0.8" would leave the notice
+    // pointing at a version range rather than the thing actually shipped.
+    if (!body.version) {
+      problems.push(`${name}.kind is "redistributed" so it must pin an exact version`);
+    } else if (/^[<>^~]|\s-\s|\|\|/.test(String(body.version))) {
+      problems.push(
+        `${name}.version must be one exact version, not a range: ${JSON.stringify(body.version)}`,
+      );
+    }
+    // What a recipient actually receives, so that is where the attribution has to be.
+    const noticePath = join(root, "NOTICE");
+    if (!existsSync(noticePath)) {
+      problems.push(`${name} is redistributed but NOTICE is missing, so no attribution ships with it`);
+    }
   }
 
   if (body.kind === undefined) {
@@ -171,12 +206,20 @@ if (existsSync(matrixPath)) {
     .filter((l) => !/^\|\s*-+\s*\|/.test(l) && !/\|\s*Authority\s*\|/.test(l));
 
   const unknown = [];
+  // A section name is an IDENTIFIER (`qdrant_edge`) and a matrix authority is PROSE ("Qdrant Edge"), so
+  // both sides are normalised before comparing. Renaming `[qdrant]` to `[qdrant_edge]` -- to name the
+  // crate actually shipped rather than the server -- made a literal word match fail and reported the
+  // matrix row as naming an unregistered authority. The check was right to fire; matching an identifier
+  // against prose letter for letter was the part that was too strict.
+  const loose = (value) => value.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
   for (const row of rows) {
     const cells = row.split("|");
     const authority = cells[3] ?? "";
-    const registered = [...sections.keys()].some((n) =>
-      new RegExp(`\\b${n}\\b`, "i").test(authority),
-    );
+    const target = loose(authority);
+    const registered = [...sections.keys()].some((n) => {
+      const name = loose(n);
+      return new RegExp(`\\b${name.replace(/ /g, "\\s+")}\\b`).test(target);
+    });
     if (registered || EXEMPT_AUTHORITY.some((re) => re.test(authority))) continue;
     unknown.push(`${(cells[2] ?? "").trim().slice(0, 48)} -> ${authority.trim().slice(0, 40)}`);
   }
@@ -215,3 +258,9 @@ const byKind = (k) =>
 console.log(`upstream pins well-formed: ${sections.size} sources`);
 console.log(`  copied source (licence binds us): ${byKind("code")}`);
 console.log(`  behaviour only (nothing copied):  ${byKind("algorithm")}`);
+// Every kind the schema accepts is printed. Until now this reported only two of the four in use, so the
+// qdrant library pin and the redrob_code protocol pin were invisible -- and the qdrant entry turned out
+// to name the wrong artefact at the wrong version, which is precisely what an unprinted line hides.
+console.log(`  linked, not copied:               ${byKind("library")}`);
+console.log(`  shipped in our binary:            ${byKind("redistributed")}`);
+console.log(`  spoken, not copied:               ${byKind("protocol")}`);

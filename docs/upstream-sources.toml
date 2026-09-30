@@ -61,14 +61,29 @@ license = "Apache-2.0; same licence as this product, so no relicense is needed"
 # targets FTS5 MATCH. It does not take the index.
 boundary = "take the query language, ranking and snippet selection; do NOT take the Tantivy index -- decided in docs/index-engine-decision.md"
 
-[qdrant]
+[qdrant_edge]
 repository = "https://github.com/qdrant/qdrant"
-minimum_version = "1.12"
-kind = "library"
+registry = "https://crates.io/crates/qdrant-edge"
+version = "0.8.0"
+kind = "redistributed"
 role = ["embedded vector search"]
-license = "Apache-2.0; embedded as Qdrant Edge, not copied"
-# Already shipped. Recorded here so the registry describes the whole upstream surface rather than
-# only the parts that are new. Attribution and the trademark statement are in NOTICE.
+license = "Apache-2.0"
+# CORRECTED 2026-09-30, and both corrections were hidden by the same thing: this entry's kind was never
+# printed by check:upstream, so nobody re-read it.
+#
+# It was `[qdrant]` with `minimum_version = "1.12"` and `kind = "library"`. Three things wrong:
+#
+#   * WRONG ARTEFACT. We do not embed the Qdrant server. src-tauri/Cargo.toml depends on the
+#     `qdrant-edge` CRATE, which is a different artefact published to crates.io.
+#   * WRONG VERSION. 1.12 is the server's version line. Cargo.lock pins qdrant-edge 0.8.0, and Cargo
+#     pins it EXACTLY (`=0.8.0`), so a `minimum_version` floor also misdescribed how it is pinned.
+#   * WRONG KIND. A Rust crate is compiled INTO the binary we distribute, so it is redistributed rather
+#     than linked. Apache-2.0 attaches a notice obligation to that distribution -- section 4(d) -- which
+#     NOTICE already carries; the kind now says why that notice is required rather than optional.
+#
+# `library` remains the right kind for something genuinely linked at runtime, which is how canvas's
+# babl, gegl, lcms2 and libmypaint are used: off by default, discovered by pkg-config, never vendored.
+boundary = "Compiled into the shipped binary as a Rust crate. No source is copied into this tree."
 
 [redrob_code]
 repository = "https://github.com/redrob-labs/redrob-code"

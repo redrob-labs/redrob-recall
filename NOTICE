@@ -12,8 +12,11 @@ identified in THIRD_PARTY_NOTICES.md, and the shipped npm and Cargo lockfiles
 identify the exact versions used by a given build.
 
 Qdrant and Qdrant Edge are licensed under the Apache License, Version 2.0, and
-are projects of Qdrant Solutions GmbH. Redrob Recall uses Qdrant Edge as an
-embedded vector-search component. "Qdrant" is used only to identify that
+are projects of Qdrant Solutions GmbH. Redrob Recall uses the `qdrant-edge` crate as an
+embedded vector-search component: version 0.8.0, compiled into the shipped
+binary rather than linked at runtime, which is why Apache-2.0 section 4(d)
+makes this notice required rather than courteous. The version is pinned exactly in
+`src-tauri/Cargo.toml` and recorded in `docs/upstream-sources.toml`. "Qdrant" is used only to identify that
 third-party technology; Redrob Recall is not an official Qdrant product and is
 not endorsed by Qdrant Solutions GmbH.
 
