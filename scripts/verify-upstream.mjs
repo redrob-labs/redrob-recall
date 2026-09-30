@@ -24,6 +24,7 @@
 // runs in `npm run check` on every change.
 
 import { readFileSync, existsSync } from "node:fs";
+import { execSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 
@@ -238,20 +239,82 @@ if (existsSync(matrixPath)) {
     process.exit(1);
   }
 
-  // No row may claim parity before a golden-output check exists to justify it. `native` means we
-  // have an implementation; `parity` means we matched the authority, and nothing here has ever run
-  // such a check. This is what stops the word drifting into the matrix by optimism.
-  const parity = rows.filter((r) => /\|\s*parity\s*\|?\s*$/.test(r));
-  if (parity.length > 0) {
-    console.error(
-      `error: ${parity.length} row(s) in compatibility.md claim 'parity', but no golden-output ` +
-        `harness exists in this repository yet. Build the harness first, or use 'native'.`,
+  // `parity` must be a citation, not a judgement. It was a blanket REFUSAL until this repository had a
+  // harness at all, which was right then and useless once one existed. Now a parity row must name a
+  // check that harness actually makes.
+  //
+  // The converse is deliberately NOT an error, and that was learned here rather than assumed. A
+  // citation may sit on a `native` row, because a harness can verify something that is not parity: this
+  // repository's only harness proves our grammar is bloop's REDUCED, with three constructs that are ours
+  // and not bloop's at all. A verified reduction is real, checkable, and not equivalence. redrob-canvas
+  // and redrob-query treated evidence-without-parity as an error; that rule was wrong and was relaxed in
+  // all three the same day.
+  //
+  // The keys are read from the harness itself, so this cannot drift from what it covers.
+  let covered = null;
+  try {
+    covered = new Set(
+      execSync("node scripts/verify-upstream-grammar.mjs --list", { encoding: "utf8" })
+        .trim()
+        .split("\n")
+        .map((line) => line.trim())
+        .filter(Boolean),
     );
+  } catch (error) {
+    // A harness that cannot be asked makes every citation into it unverifiable, so this fails rather
+    // than passing.
+    console.error(`error: the grammar harness could not list its coverage: ${error.message.split("\n")[0]}`);
     process.exit(1);
   }
+
+  const cellsOf = (row) =>
+    row.trim().replace(/^\||\|$/g, "").split("|").map((cell) => cell.trim());
+  let parityRows = 0;
+  let citingRows = 0;
+  const cited = new Set();
+  const matrixProblems = [];
+
+  for (const row of rows) {
+    const cells = cellsOf(row);
+    if (cells.length !== 6) continue;
+    const [domain, feature, , , status, evidence] = cells;
+    const keys = [...evidence.matchAll(/`([a-z-]+):([a-z0-9-]+)`/g)].map((m) => [m[1], m[2]]);
+    if (status === "parity") {
+      parityRows += 1;
+      if (!keys.length) {
+        matrixProblems.push(
+          `${domain}/${feature.slice(0, 40)} claims parity but cites no harness; ` +
+            `'parity' is a citation, not a judgement`,
+        );
+      }
+    }
+    if (keys.length) citingRows += 1;
+    for (const [prefix, key] of keys) {
+      cited.add(`${prefix}:${key}`);
+      if (prefix !== "grammar") {
+        matrixProblems.push(`${domain}/${feature.slice(0, 40)} cites unknown harness '${prefix}'`);
+      } else if (!covered.has(key)) {
+        matrixProblems.push(
+          `${domain}/${feature.slice(0, 40)} cites \`grammar:${key}\` but that harness makes no such check`,
+        );
+      }
+    }
+  }
+
+  if (matrixProblems.length) {
+    console.error("error: compatibility.md");
+    for (const problem of matrixProblems) console.error(`  ${problem}`);
+    process.exit(1);
+  }
+
+  const uncited = [...covered].filter((key) => !cited.has(`grammar:${key}`));
   console.log(
-    `compatibility matrix: ${rows.length} rows, every authority accounted for, 0 parity claims`,
+    `compatibility matrix: ${rows.length} rows, every authority accounted for, ` +
+      `${parityRows} parity claim(s), ${citingRows} row(s) citing a harness`,
   );
+  if (uncited.length) {
+    console.log(`  grammar checks no row cites: ${uncited.join(", ")}`);
+  }
 }
 
 const byKind = (k) =>

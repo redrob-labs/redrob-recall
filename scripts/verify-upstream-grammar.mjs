@@ -28,6 +28,16 @@ const fail = (message) => {
   process.exit(1);
 };
 
+// The check keys docs/compatibility.md may cite, printed by `--list` so the matrix guard can verify each
+// citation names a check this harness actually makes rather than trusting that it does. Listed WITHOUT a
+// checkout, which is what lets the guard run where this harness cannot.
+const COVERS = ['rule-disposition', 'no-negation-upstream', 'additions-present', 'stopword-subset'];
+
+if (process.argv[2] === '--list') {
+  for (const key of COVERS) console.log(key);
+  process.exit(0);
+}
+
 const checkout = process.env.REDROB_BLOOP_CHECKOUT;
 if (!checkout) {
   fail(
