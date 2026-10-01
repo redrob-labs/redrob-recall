@@ -1228,14 +1228,14 @@ function SettingsView({
             {!compactLayout &&
               (snapshot.connection.connected ? (
                 <button className="secondary" onClick={() => void disconnect()}>
-                  Disconnect
+                  <Icon name="signOut" /> Disconnect
                 </button>
               ) : (
                 <button
                   className="primary"
                   onClick={() => setShowConnect(true)}
                 >
-                  Connect Redrob
+                  <Icon name="signIn" /> Connect Redrob
                 </button>
               ))}
           </div>
