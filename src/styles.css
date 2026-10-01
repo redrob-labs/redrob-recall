@@ -2131,3 +2131,8 @@ kbd {
 .toast span {
   overflow-wrap: anywhere;
 }
+
+.doc-error {
+  color: var(--brand-dark);
+  overflow-wrap: anywhere;
+}
