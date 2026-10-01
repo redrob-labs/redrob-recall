@@ -60,9 +60,13 @@ export interface SearchResult {
   page?: number;
   heading?: string;
   content: string;
+  /** The window around the matching terms, when the keyword half found this chunk. */
+  snippet?: string;
   score: number;
   vectorScore: number;
   keywordScore: number;
+  /** How well the document's name or path matched. Zero when only its text did. */
+  documentNameScore?: number;
   modifiedAt: string;
 }
 

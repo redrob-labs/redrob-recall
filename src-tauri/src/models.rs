@@ -211,9 +211,23 @@ pub struct SearchResult {
     pub page: Option<u32>,
     pub heading: Option<String>,
     pub content: String,
+    /// The window around the matching terms, when the keyword half found this chunk.
+    ///
+    /// Distinct from `content`, which is the whole chunk. A vector-only hit has none: a semantic match
+    /// is a judgement about a whole passage, so there is no single place to point at, and inventing one
+    /// would be worse than admitting it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub snippet: Option<String>,
     pub score: f32,
     pub vector_score: f32,
     pub keyword_score: f32,
+    /// How well this chunk's document matched by name or path. Zero when it did not.
+    ///
+    /// Reported separately from `keyword_score` because they answer different questions: one says the
+    /// passage contains the terms, the other says the FILE is named for them. A result surfacing only
+    /// because of its filename should be distinguishable from one whose text matched.
+    #[serde(default)]
+    pub document_name_score: f32,
     pub modified_at: String,
 }
 
