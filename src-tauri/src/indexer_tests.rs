@@ -291,3 +291,48 @@ fn library_folders_survive_a_restart() {
         vec![expected.to_string_lossy().into_owned()]
     );
 }
+
+/// The watcher picks up a file created, edited and deleted in a watched folder, with no Check now.
+#[test]
+fn the_watcher_reflects_created_edited_and_deleted_files() {
+    let scratch = Scratch::new("watcher");
+    // Keyword search is enough to observe the watcher; keep the model out of it.
+    std::fs::create_dir_all(scratch.0.join("data")).unwrap();
+    std::fs::write(scratch.0.join("data/models"), b"not a directory").unwrap();
+    let library = scratch.0.join("library");
+    std::fs::create_dir_all(&library).unwrap();
+    std::fs::write(library.join("seed.md"), "The seed file.\n").unwrap();
+
+    let state = state_indexing(&scratch, &library); // update_settings also starts the watcher
+    super::run_full_index(&state).unwrap();
+    let stored = |word: &str| state.storage().keyword_search(word, 10).unwrap().len();
+    let wait_for = |what: &str, done: &dyn Fn() -> bool| {
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
+        while !done() {
+            assert!(
+                std::time::Instant::now() < deadline,
+                "the watcher never {what}"
+            );
+            std::thread::sleep(std::time::Duration::from_millis(100));
+        }
+    };
+
+    let file = library.join("arrived.md");
+    std::fs::write(&file, "A lavender submarine surfaced.\n").unwrap();
+    wait_for("indexed a new file", &|| stored("lavender") == 1);
+
+    std::fs::write(
+        &file,
+        "It was a turquoise submarine after all, said the log.\n",
+    )
+    .unwrap();
+    wait_for("re-read an edited file", &|| {
+        stored("turquoise") == 1 && stored("lavender") == 0
+    });
+
+    std::fs::remove_file(&file).unwrap();
+    wait_for("dropped a deleted file", &|| stored("turquoise") == 0);
+    while state.is_indexing() {
+        std::thread::sleep(std::time::Duration::from_millis(20));
+    }
+}
