@@ -483,9 +483,7 @@ function SearchView({
           <section className="results-column">
             <div className="results-toolbar">
               <strong>
-                {searching
-                  ? "Searching locally…"
-                  : `${results.length} relevant passages`}
+                {searching ? "Searching locally…" : resultSummary(results)}
               </strong>
               <div className="extension-tabs">
                 {extensions.map((item) => (
@@ -558,7 +556,7 @@ function ResultCard({
       <div className="result-main">
         <div className="result-title">
           <strong>{result.name}</strong>
-          <span>{relevanceLabel(result.score)}</span>
+          <span data-match={matchKind(result)}>{relevanceLabel(result)}</span>
         </div>
         <div className="result-path">
           {shortenPath(result.path)}
@@ -613,11 +611,7 @@ function ResultPreview({
       <h2>{result.name}</h2>
       <span className="preview-location">{result.path}</span>
       <div className="match-meter">
-        <span>
-          <i style={{ width: `${Math.round(result.score * 100)}%` }} />
-        </span>
-        <strong>{relevanceLabel(result.score)}</strong>
-        <small>search relevance</small>
+        <strong data-match={matchKind(result)}>{relevanceLabel(result)}</strong>
       </div>
       <div className="passage-label">
         <span>RELEVANT PASSAGE</span>
@@ -1788,14 +1782,38 @@ const shortenPath = (path: string) => {
 };
 const lastPathPart = (path: string) =>
   path.split(/[\\/]/).filter(Boolean).at(-1) ?? path;
-const relevanceLabel = (score: number) =>
-  score >= 0.99
-    ? "Best match"
-    : score >= 0.8
-      ? "Very relevant"
-      : score >= 0.6
-        ? "Relevant"
-        : "Related";
+const resultSummary = (results: SearchResult[]) => {
+  const exact = results.filter(
+    (result) => matchKind(result) !== "meaning",
+  ).length;
+  const near = results.length - exact;
+  const parts = [];
+  if (exact) parts.push(`${exact} ${exact === 1 ? "match" : "matches"}`);
+  if (near) parts.push(`${near} similar`);
+  if (!parts.length) return "No results";
+  // Say it when nothing contains the words: otherwise a list of neighbours reads as an answer.
+  if (!exact) return `No file contains these words · ${near} similar`;
+  return parts.join(" · ");
+};
+// What a result's label may claim is what was measured: the searched words are in the passage, or in
+// the file's name, or neither and the passage was only near in meaning. A score tier ("Best match",
+// "Very relevant") claimed more than that -- `score` is a rank fused across both halves and divided by
+// the best one in the set, so the first result always read "Best match", even for a word no file
+// contains. Measured on the six-file fixture library: a word found in one file still put all six in the
+// results with vector similarity 0.74-0.84, a nonsense word gave 0.74-0.79, and the true hit was never
+// more than 0.07 above the rest, so no similarity threshold separates them; keyword presence does.
+const matchKind = (result: SearchResult) =>
+  result.keywordScore > 0
+    ? "words"
+    : (result.documentNameScore ?? 0) > 0
+      ? "name"
+      : "meaning";
+const relevanceLabel = (result: SearchResult) =>
+  ({
+    words: "Contains your words",
+    name: "Name matches",
+    meaning: "Similar meaning",
+  })[matchKind(result)];
 const statusLabel = (status: string) =>
   ({
     idle: "Library ready",
