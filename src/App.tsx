@@ -11,6 +11,7 @@ import { Loader, Mark, type IconName } from "@redrob-labs/ui";
 import symbolDark from "./assets/brand/redrob-symbol-solid-white.png";
 import symbolLight from "./assets/brand/redrob-symbol.png";
 import { Icon } from "./ui/Icon";
+import { Highlighted } from "./highlight";
 import { bridge } from "./lib/bridge";
 import type {
   AppSettings,
@@ -341,6 +342,8 @@ function SearchView({
   const [selected, setSelected] = useState<SearchResult | null>(null);
   const [searching, setSearching] = useState(false);
   const [hasSearched, setHasSearched] = useState(false);
+  // The words the shown results were found for -- not the box, which may have been edited since.
+  const [searchedFor, setSearchedFor] = useState("");
   const [extension, setExtension] = useState("all");
   const inputRef = useRef<HTMLInputElement>(null);
 
@@ -371,6 +374,7 @@ function SearchView({
         },
       });
       setResults(found);
+      setSearchedFor(searchQuery);
       setSelected(found[0] ?? null);
     } catch (error) {
       notify(readError(error), "error");
@@ -508,6 +512,7 @@ function SearchView({
                   <ResultCard
                     key={result.chunkId}
                     result={result}
+                    query={searchedFor}
                     active={selected?.chunkId === result.chunkId}
                     onClick={() => setSelected(result)}
                   />
@@ -519,6 +524,7 @@ function SearchView({
             {selected ? (
               <ResultPreview
                 result={selected}
+                query={searchedFor}
                 notify={notify}
                 ask={() => setView("ask")}
               />
@@ -537,10 +543,12 @@ function SearchView({
 
 function ResultCard({
   result,
+  query,
   active,
   onClick,
 }: {
   result: SearchResult;
+  query: string;
   active: boolean;
   onClick: () => void;
 }) {
@@ -562,7 +570,9 @@ function ResultCard({
           {shortenPath(result.path)}
           {result.page ? ` · Page ${result.page}` : ""}
         </div>
-        <p>{result.snippet ?? result.content}</p>
+        <p>
+          <Highlighted text={result.snippet ?? result.content} query={query} />
+        </p>
       </div>
     </button>
   );
@@ -570,10 +580,12 @@ function ResultCard({
 
 function ResultPreview({
   result,
+  query,
   notify,
   ask,
 }: {
   result: SearchResult;
+  query: string;
   notify: Notify;
   ask: () => void;
 }) {
@@ -617,7 +629,9 @@ function ResultPreview({
         <span>RELEVANT PASSAGE</span>
         {result.page && <span>PAGE {result.page}</span>}
       </div>
-      <blockquote>{result.content}</blockquote>
+      <blockquote>
+        <Highlighted text={result.content} query={query} />
+      </blockquote>
       <button className="ask-about" onClick={ask}>
         <Icon name="sparkle" size={24} />
         <span>Ask about this and related files</span>
