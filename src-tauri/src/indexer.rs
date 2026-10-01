@@ -54,14 +54,53 @@ pub async fn start_full_index(state: AppState) -> Result<()> {
     start_claimed_full_index(state).await
 }
 
+/// Start a pass, or -- if one is running -- make it run once more when it finishes.
+/// Returns whether a new pass was started.
+pub fn request_index(state: &AppState) -> bool {
+    if state.is_indexing() {
+        state.request_rescan();
+        return false;
+    }
+    let state = state.clone();
+    tauri::async_runtime::spawn(async move {
+        if let Err(error) = start_full_index(state.clone()).await {
+            tracing::error!(%error, "indexing failed");
+            state.set_indexing(false);
+            state.emit_snapshot();
+        }
+    });
+    true
+}
+
 pub(crate) async fn start_claimed_full_index(state: AppState) -> Result<()> {
     state.set_paused(false);
-    let worker_state = state.clone();
-    let result = tauri::async_runtime::spawn_blocking(move || run_full_index(&worker_state)).await;
-    state.set_current_file(None);
-    state.set_indexing(false);
-    state.emit_snapshot();
-    result?
+    loop {
+        let worker_state = state.clone();
+        let result =
+            tauri::async_runtime::spawn_blocking(move || run_requested_passes(&worker_state)).await;
+        state.set_current_file(None);
+        state.set_indexing(false);
+        state.emit_snapshot();
+        result??;
+        // A request can land after the last pass checked for one but before `indexing` was
+        // cleared; it saw a pass running and queued itself. Pick it up rather than drop it.
+        if state.is_paused() || !state.take_rescan_request() || !state.set_indexing(true) {
+            return Ok(());
+        }
+    }
+}
+
+/// One full pass, then another for as long as something asked for one meanwhile -- a folder added
+/// or Check now pressed while this pass was running. Without this the request was dropped: the
+/// command answered "already indexing" and the new folder waited for the next manual check.
+fn run_requested_passes(state: &AppState) -> Result<()> {
+    state.take_rescan_request();
+    loop {
+        run_full_index(state)?;
+        if state.is_paused() || state.is_shutting_down() || !state.take_rescan_request() {
+            return Ok(());
+        }
+    }
 }
 
 fn run_full_index(state: &AppState) -> Result<()> {

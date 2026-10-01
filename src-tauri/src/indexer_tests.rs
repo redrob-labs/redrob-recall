@@ -161,3 +161,133 @@ fn library_stays_keyword_searchable_when_the_embedding_model_is_unavailable() {
         "the run after the model became available must embed every file"
     );
 }
+
+/// A folder added while a pass is running gets indexed by that run, not left until the next manual
+/// check. This was the shape of "I added a folder and nothing got indexed": the second request was
+/// answered "already indexing" and dropped.
+#[test]
+fn a_folder_added_during_a_pass_is_indexed_when_the_pass_finishes() {
+    let scratch = Scratch::new("midpass");
+    let models = Path::new(env!("CARGO_MANIFEST_DIR")).join("target/test-model-cache");
+    std::fs::create_dir_all(&models).unwrap();
+    std::fs::create_dir_all(scratch.0.join("data")).unwrap();
+    #[cfg(unix)]
+    std::os::unix::fs::symlink(&models, scratch.0.join("data/models")).unwrap();
+
+    // Second folder, with a word the fixtures do not contain.
+    let late = scratch.0.join("late");
+    std::fs::create_dir_all(&late).unwrap();
+    std::fs::write(
+        late.join("late.md"),
+        "The periwinkle zeppelin docked at noon.\n",
+    )
+    .unwrap();
+
+    let state = state_indexing(&scratch, &fixtures());
+    assert!(
+        super::request_index(&state),
+        "nothing was running, so a pass must start"
+    );
+
+    // Wait until the pass is past its settings read -- it is on a file -- so the folder below
+    // cannot be picked up by this pass and only the queued re-run can find it.
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(120);
+    while state.snapshot().unwrap().stats.current_file.is_none() {
+        assert!(
+            std::time::Instant::now() < deadline,
+            "the first pass never reached a file"
+        );
+        std::thread::sleep(std::time::Duration::from_millis(5));
+    }
+    let mut settings = state.settings();
+    settings
+        .library_paths
+        .push(late.to_string_lossy().into_owned());
+    state.update_settings(settings).unwrap();
+    assert!(
+        !super::request_index(&state),
+        "a pass is running, so this request must be queued"
+    );
+
+    while state.is_indexing() {
+        assert!(
+            std::time::Instant::now() < deadline,
+            "indexing never finished"
+        );
+        std::thread::sleep(std::time::Duration::from_millis(20));
+    }
+    assert!(
+        hits(&state, "periwinkle")
+            .iter()
+            .any(|name| name == "late.md"),
+        "the folder added mid-pass was never indexed"
+    );
+}
+
+/// Each way Add folder can refuse says why, in words the user can act on -- and refuses before
+/// anything is saved, so a refused path never shows up in the library.
+#[test]
+fn add_folder_refuses_bad_paths_with_a_reason_and_saves_nothing() {
+    let scratch = Scratch::new("refusals");
+    // Adding a folder starts indexing; keep it off the network by making the model unloadable.
+    std::fs::create_dir_all(scratch.0.join("data")).unwrap();
+    std::fs::write(scratch.0.join("data/models"), b"not a directory").unwrap();
+    let state = AppState::open_headless(scratch.0.join("data")).unwrap();
+    let add = |path: &Path| crate::commands::add_library_folder(&state, &path.to_string_lossy());
+
+    let missing = scratch.0.join("no-such-folder");
+    assert!(add(&missing).unwrap_err().ends_with("does not exist"));
+
+    let file = fixtures().join("memo.txt");
+    assert!(add(&file).unwrap_err().contains("is a file"));
+
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let locked = scratch.0.join("locked");
+        std::fs::create_dir_all(&locked).unwrap();
+        std::fs::set_permissions(&locked, std::fs::Permissions::from_mode(0o000)).unwrap();
+        // Root reads anything, so this case only means something for an ordinary user.
+        if std::fs::read_dir(&locked).is_err() {
+            assert!(add(&locked).unwrap_err().contains("not allowed to read"));
+        }
+        std::fs::set_permissions(&locked, std::fs::Permissions::from_mode(0o700)).unwrap();
+    }
+
+    assert!(
+        state.settings().library_paths.is_empty(),
+        "a refused path was saved"
+    );
+
+    add(&fixtures()).unwrap();
+    assert!(add(&fixtures())
+        .unwrap_err()
+        .ends_with("is already in your library"));
+    assert_eq!(state.settings().library_paths.len(), 1);
+    while state.is_indexing() {
+        std::thread::sleep(std::time::Duration::from_millis(20));
+    }
+}
+
+/// A folder the user added is still there after the app restarts.
+#[test]
+fn library_folders_survive_a_restart() {
+    let scratch = Scratch::new("restart");
+    // Adding a folder starts indexing; keep it off the network by making the model unloadable.
+    std::fs::create_dir_all(scratch.0.join("data")).unwrap();
+    std::fs::write(scratch.0.join("data/models"), b"not a directory").unwrap();
+    let state = AppState::open_headless(scratch.0.join("data")).unwrap();
+    crate::commands::add_library_folder(&state, &fixtures().to_string_lossy()).unwrap();
+    while state.is_indexing() {
+        std::thread::sleep(std::time::Duration::from_millis(20));
+    }
+    state.shutdown();
+    drop(state);
+
+    let reopened = AppState::open_headless(scratch.0.join("data")).unwrap();
+    let expected = std::fs::canonicalize(fixtures()).unwrap();
+    assert_eq!(
+        reopened.settings().library_paths,
+        vec![expected.to_string_lossy().into_owned()]
+    );
+}

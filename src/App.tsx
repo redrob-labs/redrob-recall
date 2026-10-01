@@ -54,12 +54,21 @@ export default function App() {
     (message: string, tone: Toast["tone"] = "info") => {
       const id = ++toastCounter.current;
       setToasts((current) => [...current, { id, message, tone }]);
-      window.setTimeout(
-        () =>
-          setToasts((current) => current.filter((toast) => toast.id !== id)),
-        3500,
-      );
+      // An error stays until it is dismissed: it is often a path plus a reason, and 3.5 s was too
+      // short to read one, let alone act on it.
+      if (tone !== "error")
+        window.setTimeout(
+          () =>
+            setToasts((current) => current.filter((toast) => toast.id !== id)),
+          3500,
+        );
     },
+    [],
+  );
+
+  const dismissToast = useCallback(
+    (id: number) =>
+      setToasts((current) => current.filter((toast) => toast.id !== id)),
     [],
   );
 
@@ -110,6 +119,10 @@ export default function App() {
       <>
         <DemoBanner />
         <Onboarding snapshot={snapshot} refresh={refresh} notify={notify} />
+        {/* Onboarding is where the first folder is chosen, so its refusals must be visible
+            here too. The stack used to render only in the main shell, so every error on this
+            screen was swallowed and the button looked like it did nothing. */}
+        <ToastStack toasts={toasts} dismiss={dismissToast} />
       </>
     );
   }
@@ -133,7 +146,7 @@ export default function App() {
       {progress && progress.status !== "idle" && (
         <ProgressBar progress={progress} />
       )}
-      <ToastStack toasts={toasts} />
+      <ToastStack toasts={toasts} dismiss={dismissToast} />
     </div>
   );
 }
@@ -215,8 +228,8 @@ function Onboarding({
       setAdding(true);
       const path = await bridge.chooseFolder();
       if (!path) return;
+      // Adding a folder schedules its indexing on the desktop side, even mid-pass.
       await bridge.addLibraryPath(path);
-      await bridge.startIndexing();
       await refresh();
       notify("Folder added. Local indexing has started.", "success");
     } catch (error) {
@@ -827,9 +840,8 @@ function SourcesView({
       const path = await bridge.chooseFolder();
       if (!path) return;
       await bridge.addLibraryPath(path);
-      await bridge.startIndexing();
       await refresh();
-      notify("Source folder added.", "success");
+      notify("Source folder added. It will be indexed next.", "success");
     } catch (error) {
       notify(readError(error), "error");
     }
@@ -888,7 +900,16 @@ function SourcesView({
             onClick={() =>
               void bridge
                 .startIndexing()
-                .then(refresh)
+                .then((started) => {
+                  // `false` means a pass is already running; it will run again after it.
+                  notify(
+                    started
+                      ? "Checking your library for changes."
+                      : "Indexing is in progress; your library will be checked again when it finishes.",
+                    "success",
+                  );
+                  return refresh();
+                })
                 .catch((error) => notify(readError(error), "error"))
             }
           >
@@ -1542,19 +1563,40 @@ function ProgressBar({ progress }: { progress: IndexProgress }) {
     </div>
   );
 }
-function ToastStack({ toasts }: { toasts: Toast[] }) {
+function ToastStack({
+  toasts,
+  dismiss,
+}: {
+  toasts: Toast[];
+  dismiss: (id: number) => void;
+}) {
   return (
     <div className="toast-stack">
       {toasts.map((toast) => (
-        <div key={toast.id} className={`toast ${toast.tone}`}>
+        <div
+          key={toast.id}
+          className={`toast ${toast.tone}`}
+          role={toast.tone === "error" ? "alert" : "status"}
+        >
           {toast.tone === "success" ? (
             <Icon name="check" />
           ) : toast.tone === "error" ? (
-            <Icon name="close" />
+            // Not `close`: that glyph is now the dismiss button beside it.
+            <Icon name="warning" />
           ) : (
             <Icon name="sparkle" />
           )}
           <span>{toast.message}</span>
+          {toast.tone === "error" && (
+            <button
+              type="button"
+              className="toast-dismiss"
+              aria-label="Dismiss"
+              onClick={() => dismiss(toast.id)}
+            >
+              <Icon name="close" />
+            </button>
+          )}
         </div>
       ))}
     </div>

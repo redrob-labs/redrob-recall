@@ -29,17 +29,44 @@ pub async fn choose_library_folder(app: AppHandle) -> Result<Option<String>, Str
 
 #[tauri::command]
 pub fn add_library_path(path: String, state: State<'_, AppState>) -> Result<(), String> {
-    let canonical = std::fs::canonicalize(&path).map_err(command_error)?;
+    add_library_folder(state.inner(), &path)
+}
+
+/// What Add folder does, without the Tauri wrapper, so each refusal can be tested. Every error is
+/// a sentence the user sees in the toast, so it names the path and what to do.
+pub(crate) fn add_library_folder(state: &AppState, path: &str) -> Result<(), String> {
+    let canonical = std::fs::canonicalize(path).map_err(|error| match error.kind() {
+        std::io::ErrorKind::NotFound => format!("{path} does not exist"),
+        std::io::ErrorKind::PermissionDenied => {
+            format!("Redrob Recall is not allowed to read {path}")
+        }
+        _ => format!("{path} could not be opened: {error}"),
+    })?;
     if !canonical.is_dir() {
-        return Err("Choose a folder, not a file".into());
+        return Err(format!(
+            "{path} is a file; choose the folder that contains it"
+        ));
+    }
+    // Being able to resolve a folder is not being able to list it, and an unlistable folder would
+    // otherwise be accepted and then index to nothing without a word.
+    if let Err(error) = std::fs::read_dir(&canonical) {
+        return Err(if error.kind() == std::io::ErrorKind::PermissionDenied {
+            format!("Redrob Recall is not allowed to read {path}")
+        } else {
+            format!("{path} could not be read: {error}")
+        });
     }
     let mut settings = state.settings();
     let path = canonical.to_string_lossy().to_string();
-    if !settings.library_paths.contains(&path) {
-        settings.library_paths.push(path);
-        settings.library_paths.sort();
+    if settings.library_paths.contains(&path) {
+        return Err(format!("{path} is already in your library"));
     }
-    state.update_settings(settings).map_err(command_error)
+    settings.library_paths.push(path);
+    settings.library_paths.sort();
+    state.update_settings(settings).map_err(command_error)?;
+    // A folder that is added must be read, whether or not a pass is running right now.
+    indexer::request_index(state);
+    Ok(())
 }
 
 #[tauri::command]
@@ -69,18 +96,8 @@ pub fn remove_library_path(path: String, state: State<'_, AppState>) -> Result<(
 
 #[tauri::command]
 pub fn start_indexing(state: State<'_, AppState>) -> Result<bool, String> {
-    if state.is_indexing() {
-        return Ok(false);
-    }
-    let state = state.inner().clone();
-    tauri::async_runtime::spawn(async move {
-        if let Err(error) = indexer::start_full_index(state.clone()).await {
-            tracing::error!(%error, "indexing failed");
-            state.set_indexing(false);
-            state.emit_snapshot();
-        }
-    });
-    Ok(true)
+    // `false` now means "queued behind the running pass", not "ignored".
+    Ok(indexer::request_index(state.inner()))
 }
 
 #[tauri::command]
