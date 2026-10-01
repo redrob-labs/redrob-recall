@@ -20,7 +20,8 @@ use tauri::{AppHandle, Emitter};
 use crate::models::{EMBEDDING_DIMENSION, VECTOR_NAME};
 
 struct Inner {
-    pub app_handle: AppHandle,
+    /// `None` only in tests, which run the real indexer without a window to emit to.
+    pub app_handle: Option<AppHandle>,
     pub data_dir: PathBuf,
     pub storage: Storage,
     pub shard: Mutex<Option<EdgeShard>>,
@@ -41,6 +42,22 @@ impl AppState {
     pub fn initialize(app_handle: AppHandle) -> Result<Self> {
         let base_dirs = BaseDirs::new().context("home directory is unavailable")?;
         let data_dir = base_dirs.home_dir().join(".redrob").join("recall");
+        Self::open(Some(app_handle), data_dir, load_api_key().ok())
+    }
+
+    /// The real state, rooted somewhere other than the user's library and with nothing to emit to.
+    /// Test-only: the indexer integration tests drive the same code the app does, without touching
+    /// `~/.redrob/recall` or the OS keyring.
+    #[cfg(test)]
+    pub(crate) fn open_headless(data_dir: PathBuf) -> Result<Self> {
+        Self::open(None, data_dir, None)
+    }
+
+    fn open(
+        app_handle: Option<AppHandle>,
+        data_dir: PathBuf,
+        api_key: Option<String>,
+    ) -> Result<Self> {
         std::fs::create_dir_all(&data_dir)?;
         #[cfg(unix)]
         {
@@ -65,7 +82,6 @@ impl AppState {
             storage.mark_all_vectors_pending()?;
         }
         let embedder = LocalEmbedder::new(&data_dir.join("models"));
-        let api_key = load_api_key().ok();
 
         Ok(Self(Arc::new(Inner {
             app_handle,
@@ -242,13 +258,16 @@ impl AppState {
         *self.0.watcher.lock() = Some(watcher);
     }
 
-    pub fn app_handle(&self) -> &AppHandle {
-        &self.0.app_handle
+    /// Emit to the window, if there is one. Emission is best-effort everywhere it is used.
+    pub fn emit<S: serde::Serialize + Clone>(&self, event: &str, payload: S) {
+        if let Some(app_handle) = &self.0.app_handle {
+            let _ = app_handle.emit(event, payload);
+        }
     }
 
     pub fn emit_snapshot(&self) {
         if let Ok(snapshot) = self.snapshot() {
-            let _ = self.0.app_handle.emit("snapshot-changed", snapshot);
+            self.emit("snapshot-changed", snapshot);
         }
     }
 

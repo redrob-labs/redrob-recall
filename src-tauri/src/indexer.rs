@@ -19,7 +19,6 @@ use std::{
     path::{Path, PathBuf},
     time::{Duration, SystemTime},
 };
-use tauri::Emitter;
 use zip::ZipArchive;
 
 pub fn configure_watcher(state: &AppState) -> Result<()> {
@@ -281,7 +280,19 @@ fn index_file(state: &AppState, path: &Path) -> Result<()> {
             .iter()
             .map(|chunk| chunk.content.clone())
             .collect::<Vec<_>>();
-        let embeddings = state.embedder().embed_passages(&texts)?;
+        let embeddings = match state.embedder().embed_passages(&texts) {
+            Ok(embeddings) => embeddings,
+            Err(error) => {
+                // The model is downloaded on first use, so offline or with its host blocked this
+                // fails for EVERY file. Failing the file here used to delete its keyword chunks too
+                // (`mark_document_failed`), leaving a library with nothing searchable at all, while
+                // search itself already falls back to keywords when vectors are missing. The text is
+                // stored; leave the vectors `pending`, which `document_is_current` treats as stale,
+                // so the next index run embeds this file again.
+                tracing::warn!(path = %path.display(), %error, "embedding unavailable; keyword search only until the next index run");
+                return Ok(());
+            }
+        };
         let points = chunk_batch
             .iter()
             .zip(id_batch.iter())
@@ -515,6 +526,10 @@ fn system_time_string(value: SystemTime) -> String {
 }
 
 fn emit_progress(state: &AppState, progress: IndexProgress) {
-    let _ = state.app_handle().emit("index-progress", progress);
+    state.emit("index-progress", progress);
     state.emit_snapshot();
 }
+
+#[cfg(test)]
+#[path = "indexer_tests.rs"]
+mod tests;
