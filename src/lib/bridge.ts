@@ -13,6 +13,10 @@ import type {
   SearchRequest,
   SearchResult,
 } from "../types";
+import packageJson from "../../package.json";
+
+/** Shown instead of a real path in the browser demo, where no folder can be read. */
+export const DEMO_FOLDER = "Sample folder (browser demo, not on disk)";
 
 const isDesktop =
   typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
@@ -119,7 +123,8 @@ function mockSnapshot(): AppSnapshot {
       endpoint: defaultSettings.redrobBaseUrl,
     },
     dataDirectory: "~/.redrob/recall",
-    appVersion: "0.1.0",
+    // Read from the manifest the release bumps, so the demo cannot drift from the shipped version.
+    appVersion: packageJson.version,
   };
 }
 
@@ -130,7 +135,9 @@ export const bridge = {
   },
   async chooseFolder(): Promise<string | null> {
     if (isDesktop) return invoke("choose_library_folder");
-    return "/Users/you/Documents";
+    // The browser has no folder picker and no filesystem. Return a name that cannot be mistaken
+    // for a real folder, so nothing downstream looks like it indexed the user's files.
+    return DEMO_FOLDER;
   },
   async addLibraryPath(path: string): Promise<void> {
     if (isDesktop) return invoke("add_library_path", { path });

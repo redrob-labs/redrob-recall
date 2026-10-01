@@ -33,10 +33,13 @@
   --brand-dark: var(--action-primary-hover);
   --brand-soft: var(--surface-brand-subtle);
   --green: var(--status-success);
-  --green-soft: color-mix(in oklab, var(--status-success) 16%, var(--surface-raised));
+  --green-soft: color-mix(
+    in oklab,
+    var(--status-success) 16%,
+    var(--surface-raised)
+  );
   --amber: var(--status-warning);
 }
-
 
 * {
   box-sizing: border-box;
@@ -204,7 +207,8 @@ strong,
   height: 7px;
   border-radius: 50%;
   background: var(--status-success);
-  box-shadow: 0 0 0 3px color-mix(in oklab, var(--status-success) 18%, transparent);
+  box-shadow: 0 0 0 3px
+    color-mix(in oklab, var(--status-success) 18%, transparent);
 }
 .pulse-dot {
   background: var(--status-info);
@@ -581,7 +585,9 @@ strong,
 }
 .search-box:focus-within {
   border-color: var(--focus-ring);
-  box-shadow: var(--shadow-md), 0 0 0 var(--focus-ring-width) var(--focus-ring);
+  box-shadow:
+    var(--shadow-md),
+    0 0 0 var(--focus-ring-width) var(--focus-ring);
 }
 .search-box > svg {
   flex: none;
@@ -1030,7 +1036,9 @@ kbd {
 }
 .ask-composer:focus-within {
   border-color: var(--focus-ring);
-  box-shadow: var(--shadow-md), 0 0 0 var(--focus-ring-width) var(--focus-ring);
+  box-shadow:
+    var(--shadow-md),
+    0 0 0 var(--focus-ring-width) var(--focus-ring);
 }
 .ask-composer textarea {
   display: block;
@@ -2071,4 +2079,34 @@ kbd {
     right: 24px;
     display: inline-flex;
   }
+}
+
+/* Browser-preview marker. Fixed so it sits above every screen without changing their layout. */
+.demo-banner {
+  position: fixed;
+  top: 8px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 1000;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 4px 10px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 999px;
+  background: var(--surface-raised);
+  color: var(--ink-secondary);
+  box-shadow: var(--shadow-sm);
+  font-size: 11px;
+  white-space: nowrap;
+  pointer-events: none;
+}
+.demo-banner span {
+  padding: 1px 6px;
+  border-radius: 4px;
+  background: var(--action-primary);
+  color: var(--ink-on-brand);
+  font-size: 9px;
+  font-weight: 800;
+  letter-spacing: 0.09em;
 }

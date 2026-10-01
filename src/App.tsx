@@ -28,6 +28,20 @@ type Toast = {
   tone: "success" | "error" | "info";
 };
 
+/**
+ * The browser build runs on a mock bridge: folders, indexing and search are simulated. Say so on
+ * every screen, so a browser preview is never mistaken for the desktop app.
+ */
+function DemoBanner() {
+  if (bridge.isDesktop) return null;
+  return (
+    <div className="demo-banner" role="status" data-testid="demo-banner">
+      <span>DEMO</span> Browser preview · folders and indexing are simulated,
+      sample data only
+    </div>
+  );
+}
+
 export default function App() {
   const [snapshot, setSnapshot] = useState<AppSnapshot | null>(null);
   const [progress, setProgress] = useState<IndexProgress | null>(null);
@@ -92,11 +106,17 @@ export default function App() {
     return <BootState />;
   }
   if (snapshot.settings.libraryPaths.length === 0) {
-    return <Onboarding snapshot={snapshot} refresh={refresh} notify={notify} />;
+    return (
+      <>
+        <DemoBanner />
+        <Onboarding snapshot={snapshot} refresh={refresh} notify={notify} />
+      </>
+    );
   }
 
   return (
     <div className="app-shell">
+      <DemoBanner />
       <Sidebar view={view} setView={setView} snapshot={snapshot} />
       <main className="workspace">
         {view === "search" && (
@@ -358,8 +378,8 @@ function SearchView({
         </div>
         <div className="header-meta">
           <span>
-            <Icon name="database" /> {formatNumber(snapshot.stats.indexedChunks)}{" "}
-            passages
+            <Icon name="database" />{" "}
+            {formatNumber(snapshot.stats.indexedChunks)} passages
           </span>
           <span className={snapshot.stats.status === "idle" ? "ready" : "busy"}>
             {snapshot.stats.status === "idle" ? (
@@ -665,8 +685,8 @@ function AskView({
                 {formatNumber(snapshot.stats.indexedChunks)} passages
               </span>
               <span>
-                <Loader size="sm" label="Reading the strongest evidence" /> Reading the
-                strongest evidence
+                <Loader size="sm" label="Reading the strongest evidence" />{" "}
+                Reading the strongest evidence
               </span>
               <span>Composing an answer with citations</span>
             </div>
@@ -1602,7 +1622,8 @@ function BootState() {
       <Logo />
       <h1>Redrob Recall</h1>
       <p>
-        <Loader size="sm" label="Opening your local library" /> Opening your local library…
+        <Loader size="sm" label="Opening your local library" /> Opening your
+        local library…
       </p>
     </main>
   );
