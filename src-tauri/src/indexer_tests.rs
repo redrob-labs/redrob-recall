@@ -291,3 +291,73 @@ fn library_folders_survive_a_restart() {
         vec![expected.to_string_lossy().into_owned()]
     );
 }
+
+/// Check now re-reads what changed and nothing else, and forgets what was deleted. Observed through
+/// chunk ids: an unchanged file keeps its ids, a re-read file gets new ones.
+#[test]
+fn a_second_pass_rereads_only_changed_files_and_drops_deleted_ones() {
+    let scratch = Scratch::new("incremental");
+    // The real model: without vectors every file stays due for re-indexing by design (see the
+    // offline test), which would make "unchanged" unobservable.
+    let models = Path::new(env!("CARGO_MANIFEST_DIR")).join("target/test-model-cache");
+    std::fs::create_dir_all(&models).unwrap();
+    std::fs::create_dir_all(scratch.0.join("data")).unwrap();
+    #[cfg(unix)]
+    std::os::unix::fs::symlink(&models, scratch.0.join("data/models")).unwrap();
+    let library = scratch.0.join("library");
+    std::fs::create_dir_all(&library).unwrap();
+    let kept = library.join("kept.md");
+    let edited = library.join("edited.md");
+    let deleted = library.join("deleted.md");
+    std::fs::write(&kept, "The obsidian kettle stays the same.\n").unwrap();
+    std::fs::write(&edited, "The first draft mentions a tangerine.\n").unwrap();
+    std::fs::write(&deleted, "The vermilion compass will be thrown away.\n").unwrap();
+
+    let state = state_indexing(&scratch, &library);
+    super::run_full_index(&state).unwrap();
+    let ids = |path: &Path| {
+        state
+            .storage()
+            .chunk_ids_for_path(&path.to_string_lossy())
+            .unwrap()
+    };
+    let kept_before = ids(&kept);
+    let edited_before = ids(&edited);
+    assert!(!kept_before.is_empty() && !edited_before.is_empty());
+
+    // Different length as well as content, so the change is visible even on a filesystem whose
+    // modification times are coarser than this test.
+    std::fs::write(
+        &edited,
+        "The second draft replaces it with a pomegranate entirely.\n",
+    )
+    .unwrap();
+    std::fs::remove_file(&deleted).unwrap();
+    super::run_full_index(&state).unwrap();
+
+    assert_eq!(ids(&kept), kept_before, "an unchanged file was re-read");
+    assert_ne!(
+        ids(&edited),
+        edited_before,
+        "an edited file was not re-read"
+    );
+    assert!(
+        ids(&deleted).is_empty(),
+        "a deleted file is still in the library"
+    );
+    assert!(hits(&state, "pomegranate").iter().any(|n| n == "edited.md"));
+    // Absence is checked against the stored text, not ranked results: semantic search always
+    // returns the nearest files, so "tangerine" still ranks edited.md even though the word is gone.
+    let stored = |word: &str| state.storage().keyword_search(word, 10).unwrap().len();
+    assert_eq!(
+        stored("tangerine"),
+        0,
+        "the edited file's old text is still stored"
+    );
+    assert_eq!(
+        stored("vermilion"),
+        0,
+        "the deleted file's text is still stored"
+    );
+    assert_eq!(stored("pomegranate"), 1);
+}
