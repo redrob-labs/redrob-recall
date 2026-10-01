@@ -196,17 +196,33 @@ export const bridge = {
   async documents(): Promise<DocumentRecord[]> {
     if (isDesktop) return invoke("get_documents", { limit: 250, offset: 0 });
     if (!demoEnabled) return [];
-    return demoResults.map((result) => ({
-      id: result.documentId,
-      path: result.path,
-      name: result.name,
-      extension: result.extension,
-      mimeType: "text/plain",
-      modifiedAt: result.modifiedAt,
-      sizeBytes: 1_420_000,
-      status: "indexed",
-      chunkCount: 18,
-    }));
+    return demoResults
+      .map(
+        (result): DocumentRecord => ({
+          id: result.documentId,
+          path: result.path,
+          name: result.name,
+          extension: result.extension,
+          mimeType: "text/plain",
+          modifiedAt: result.modifiedAt,
+          sizeBytes: 1_420_000,
+          status: "indexed",
+          chunkCount: 18,
+        }),
+      )
+      .concat({
+        // One failure, so the demo shows what a failed file looks like and why it failed.
+        id: 9_001,
+        path: "/demo/Scans/receipt-photo.pdf",
+        name: "receipt-photo.pdf",
+        extension: "pdf",
+        mimeType: "application/pdf",
+        modifiedAt: "2026-09-01T10:00:00Z",
+        sizeBytes: 2_310_000,
+        status: "failed",
+        chunkCount: 0,
+        lastError: "no readable text was found",
+      });
   },
   async openSource(path: string): Promise<void> {
     if (isDesktop) return invoke("open_source", { path });

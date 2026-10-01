@@ -960,39 +960,54 @@ function SourcesView({
               <span>Modified</span>
               <span>Status</span>
             </div>
-            {documents.slice(0, 12).map((document) => (
-              <button
-                className="table-row"
-                key={document.id}
-                onClick={() =>
-                  void bridge
-                    .openSource(document.path)
-                    .catch((error) => notify(readError(error), "error"))
-                }
-              >
-                <span className="document-name">
-                  <span className={`tiny-file ${document.extension}`}>
-                    <FileTypeIcon extension={document.extension} />
-                  </span>
-                  <span>
-                    <strong>{document.name}</strong>
-                    <small>{shortenPath(document.path)}</small>
-                  </span>
-                </span>
-                <span>{document.extension.toUpperCase()}</span>
-                <span>{document.chunkCount}</span>
-                <span>{formatDate(document.modifiedAt)}</span>
-                <span
-                  className={
-                    document.status === "indexed"
-                      ? "doc-status good"
-                      : "doc-status bad"
+            {/* Failed files first: the list shows only 12, and a failure that falls below the
+                cut is a "Needs attention" count with nothing to attend to. */}
+            {[...documents]
+              .sort(
+                (a, b) =>
+                  Number(a.status === "indexed") -
+                  Number(b.status === "indexed"),
+              )
+              .slice(0, 12)
+              .map((document) => (
+                <button
+                  className="table-row"
+                  key={document.id}
+                  onClick={() =>
+                    void bridge
+                      .openSource(document.path)
+                      .catch((error) => notify(readError(error), "error"))
                   }
                 >
-                  {document.status === "indexed" ? "Ready" : "Failed"}
-                </span>
-              </button>
-            ))}
+                  <span className="document-name">
+                    <span className={`tiny-file ${document.extension}`}>
+                      <FileTypeIcon extension={document.extension} />
+                    </span>
+                    <span>
+                      <strong>{document.name}</strong>
+                      <small>{shortenPath(document.path)}</small>
+                      {document.status !== "indexed" && document.lastError && (
+                        // Why it failed, which the indexer records and the table used to drop.
+                        <small className="doc-error">
+                          {document.lastError}
+                        </small>
+                      )}
+                    </span>
+                  </span>
+                  <span>{document.extension.toUpperCase()}</span>
+                  <span>{document.chunkCount}</span>
+                  <span>{formatDate(document.modifiedAt)}</span>
+                  <span
+                    className={
+                      document.status === "indexed"
+                        ? "doc-status good"
+                        : "doc-status bad"
+                    }
+                  >
+                    {document.status === "indexed" ? "Ready" : "Failed"}
+                  </span>
+                </button>
+              ))}
           </div>
         )}
       </section>
