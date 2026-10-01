@@ -900,26 +900,69 @@ function SourcesView({
             <h2>Watched folders</h2>
             <p>Changes here are picked up automatically.</p>
           </div>
-          <button
-            className="secondary"
-            onClick={() =>
-              void bridge
-                .startIndexing()
-                .then((started) => {
-                  // `false` means a pass is already running; it will run again after it.
-                  notify(
-                    started
-                      ? "Checking your library for changes."
-                      : "Indexing is in progress; your library will be checked again when it finishes.",
-                    "success",
-                  );
-                  return refresh();
-                })
-                .catch((error) => notify(readError(error), "error"))
-            }
-          >
-            <Icon name="refresh" /> Check now
-          </button>
+          <div className="section-actions">
+            <button
+              className="secondary"
+              onClick={() =>
+                void bridge
+                  .startIndexing()
+                  .then((started) => {
+                    // `false` means a pass is already running; it will run again after it.
+                    notify(
+                      started
+                        ? "Checking your library for changes."
+                        : "Indexing is in progress; your library will be checked again when it finishes.",
+                      "success",
+                    );
+                    return refresh();
+                  })
+                  .catch((error) => notify(readError(error), "error"))
+              }
+            >
+              <Icon name="refresh" /> Check now
+            </button>
+            {/* Pause was implemented end to end (pause_indexing, honoured per file by the indexer) and
+              reachable from nowhere -- which also left Backup and Clear, which refuse while indexing,
+              with no way to satisfy them except waiting the whole pass out. */}
+            {(snapshot.stats.status === "indexing" ||
+              snapshot.stats.status === "scanning") && (
+              <button
+                className="secondary"
+                data-testid="pause-indexing"
+                onClick={() =>
+                  void bridge
+                    .pauseIndexing()
+                    .then(() => {
+                      notify(
+                        "Indexing will pause after the current file.",
+                        "success",
+                      );
+                      return refresh();
+                    })
+                    .catch((error) => notify(readError(error), "error"))
+                }
+              >
+                <Icon name="pause" /> Pause
+              </button>
+            )}
+            {snapshot.stats.status === "paused" && (
+              <button
+                className="secondary"
+                data-testid="resume-indexing"
+                onClick={() =>
+                  void bridge
+                    .startIndexing()
+                    .then(() => {
+                      notify("Indexing resumed.", "success");
+                      return refresh();
+                    })
+                    .catch((error) => notify(readError(error), "error"))
+                }
+              >
+                <Icon name="play" /> Resume
+              </button>
+            )}
+          </div>
         </div>
         <div className="folder-list">
           {snapshot.settings.libraryPaths.map((path) => (
