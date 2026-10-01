@@ -65,14 +65,17 @@ async function shot(name) {
 }
 async function until(what, check, seconds = 120) {
   const deadline = Date.now() + seconds * 1000;
+  let last = "the check returned nothing";
   for (;;) {
     try {
       const value = await check();
       if (value) return value;
-    } catch {
-      // not there yet
+    } catch (error) {
+      // Kept, because "timed out" alone hid the reason on the first CI run.
+      last = error.message;
     }
-    if (Date.now() > deadline) throw new Error(`timed out waiting for ${what}`);
+    if (Date.now() > deadline)
+      throw new Error(`timed out waiting for ${what}; last: ${last}`);
     await new Promise((resolve) => setTimeout(resolve, 500));
   }
 }
@@ -86,7 +89,7 @@ try {
   ).sessionId;
 
   const choose = await until("the onboarding screen", () =>
-    find("//button[contains(normalize-space(.), 'Choose folders')]"),
+    find("//button[.//text()[contains(., 'Choose folders')]]"),
   );
   await shot("1-onboarding");
   await click(choose);
@@ -134,7 +137,13 @@ try {
 } catch (error) {
   failed = true;
   console.error(`e2e failed: ${error.message}`);
-  if (session) await shot("failure").catch(() => {});
+  if (session) {
+    await shot("failure").catch(() => {});
+    const source = await wd("GET", `/session/${session}/source`).catch(
+      (e) => `source unavailable: ${e.message}`,
+    );
+    writeFileSync(join(SHOTS, "failure.html"), String(source));
+  }
 } finally {
   if (session) await wd("DELETE", `/session/${session}`).catch(() => {});
 }
