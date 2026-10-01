@@ -2173,3 +2173,15 @@ blockquote mark {
   color: var(--accent-yellow-5);
   border-radius: 2px;
 }
+
+/* A result whose folder is gone: still searchable, not openable. */
+.folder-gone {
+  color: var(--status-danger);
+}
+
+/* Disabled secondary and icon buttons read as unavailable, like a disabled primary. */
+.secondary:disabled,
+.icon-button:disabled {
+  opacity: 0.52;
+  cursor: not-allowed;
+}
