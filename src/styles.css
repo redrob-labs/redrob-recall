@@ -2147,3 +2147,14 @@ kbd {
 .match-meter [data-match="meaning"] {
   color: var(--ink-muted);
 }
+
+/* A word of the search, marked where it appears. A highlighter: the yellow tint with the family's own
+   deep ink, the same in both themes, because neither theme's text colour reads on it and a quiet brand
+   tint measured 238,244,255 on a 248,249,251 card -- present and invisible. */
+.result-card mark,
+.preview-panel mark,
+blockquote mark {
+  background: var(--accent-yellow-2);
+  color: var(--accent-yellow-5);
+  border-radius: 2px;
+}
