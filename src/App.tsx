@@ -14,6 +14,7 @@ import symbolLight from "./assets/brand/redrob-symbol.png";
 import { Icon } from "./ui/Icon";
 import { Highlighted } from "./highlight";
 import { stepIndex } from "./resultNav";
+import { inMissingFolder } from "./folders";
 import { bridge } from "./lib/bridge";
 import type {
   AppSettings,
@@ -539,6 +540,7 @@ function SearchView({
                     key={result.chunkId}
                     result={result}
                     query={searchedFor}
+                    missing={inMissingFolder(result.path, snapshot.folders)}
                     active={selected?.chunkId === result.chunkId}
                     onClick={() => setSelected(result)}
                   />
@@ -551,6 +553,7 @@ function SearchView({
               <ResultPreview
                 result={selected}
                 query={searchedFor}
+                missing={inMissingFolder(selected.path, snapshot.folders)}
                 notify={notify}
                 ask={() => setView("ask")}
               />
@@ -570,11 +573,13 @@ function SearchView({
 function ResultCard({
   result,
   query,
+  missing,
   active,
   onClick,
 }: {
   result: SearchResult;
   query: string;
+  missing: boolean;
   active: boolean;
   onClick: () => void;
 }) {
@@ -596,6 +601,7 @@ function ResultCard({
         <div className="result-path">
           {shortenPath(result.path)}
           {result.page ? ` · Page ${result.page}` : ""}
+          {missing && <span className="folder-gone"> · Folder not found</span>}
         </div>
         <p>
           <Highlighted text={result.snippet ?? result.content} query={query} />
@@ -608,11 +614,13 @@ function ResultCard({
 function ResultPreview({
   result,
   query,
+  missing,
   notify,
   ask,
 }: {
   result: SearchResult;
   query: string;
+  missing: boolean;
   notify: Notify;
   ask: () => void;
 }) {
@@ -633,12 +641,23 @@ function ResultPreview({
   return (
     <div className="preview-content">
       <div className="preview-actions">
-        <button className="secondary" onClick={() => void open()}>
+        {/* The text is still indexed, but the file is not on disk: say so instead of failing. */}
+        <button
+          className="secondary"
+          disabled={missing}
+          title={
+            missing
+              ? "Its folder is not found -- reconnect the drive or remove the folder"
+              : undefined
+          }
+          onClick={() => void open()}
+        >
           <Icon name="external" /> Open file
         </button>
         <button
           className="icon-button"
-          title="Show in folder"
+          title={missing ? "Its folder is not found" : "Show in folder"}
+          disabled={missing}
           onClick={() => void reveal()}
         >
           <Icon name="folderOpen" size={24} />
