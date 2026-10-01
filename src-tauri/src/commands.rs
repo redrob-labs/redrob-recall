@@ -23,6 +23,10 @@ pub fn get_snapshot(state: State<'_, AppState>) -> Result<AppSnapshot, String> {
 
 #[tauri::command]
 pub async fn choose_library_folder(app: AppHandle) -> Result<Option<String>, String> {
+    #[cfg(feature = "e2e")]
+    if let Ok(folder) = std::env::var("REDROB_E2E_FOLDER") {
+        return Ok(Some(folder));
+    }
     let selection = app.dialog().file().blocking_pick_folder();
     Ok(selection.map(|path| path.to_string()))
 }

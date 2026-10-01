@@ -329,6 +329,19 @@ jobs:
           updaterJsonPreferNsis: true
           args: --target ${{ matrix.target }} --bundles ${{ matrix.bundles }} --config src-tauri/tauri.release.conf.json
 
+      # The e2e cargo feature lets a WebDriver test choose the library folder through an environment
+      # variable. Prove from the shipped bytes, on every platform, that it is not in this build.
+      - name: Prove the release binary carries no end-to-end test hook
+        shell: bash
+        env:
+          RELEASE_TARGET: ${{ matrix.target }}
+        run: |
+          set -euo pipefail
+          dir="src-tauri/target/${RELEASE_TARGET}/release"
+          bin="$dir/redrob-recall"
+          [ -f "$bin" ] || bin="$dir/redrob-recall.exe"
+          node scripts/check-e2e-feature.mjs "$bin"
+
       # The default bundler ships the build host's libwayland in the AppImage, and on Mesa 25+ that
       # makes WebKitWebProcess abort with EGL_BAD_PARAMETER: the window opens and stays blank
       # (tauri-apps/tauri#15665). Measured on v0.2.0 before this step existed -- strace on the web
@@ -393,7 +406,6 @@ jobs:
             }
             Write-Host "$($installer.Name) signed by $($signature.SignerCertificate.Subject) status=$($signature.Status)"
           }
-
 
   # The CDN promotion job that used to live here is gone: GitHub Releases is now the
   # update channel itself, so there is nothing to copy anywhere. What that job also
