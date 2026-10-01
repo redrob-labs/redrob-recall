@@ -2136,3 +2136,9 @@ kbd {
   color: var(--brand-dark);
   overflow-wrap: anywhere;
 }
+
+/* A near-in-meaning result is shown, but it does not claim to contain what was searched. */
+.result-title [data-match="meaning"],
+.match-meter [data-match="meaning"] {
+  color: var(--ink-muted);
+}
