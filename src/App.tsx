@@ -6,12 +6,14 @@ import {
   useState,
   type FormEvent,
   type ReactNode,
+  type KeyboardEvent as ReactKeyboardEvent,
 } from "react";
 import { Loader, Mark, type IconName } from "@redrob-labs/ui";
 import symbolDark from "./assets/brand/redrob-symbol-solid-white.png";
 import symbolLight from "./assets/brand/redrob-symbol.png";
 import { Icon } from "./ui/Icon";
 import { Highlighted } from "./highlight";
+import { stepIndex } from "./resultNav";
 import { bridge } from "./lib/bridge";
 import type {
   AppSettings,
@@ -382,6 +384,25 @@ function SearchView({
       setSearching(false);
     }
   };
+  const listRef = useRef<HTMLDivElement>(null);
+  // Up and Down move through the results from the search box or the list, as a search list should.
+  // From the box the caret stays put so typing can go on; Home and End stay the box's own keys there.
+  const moveSelection = (
+    event: ReactKeyboardEvent<HTMLElement>,
+    fromInput: boolean,
+  ) => {
+    if (fromInput && (event.key === "Home" || event.key === "End")) return;
+    const current = results.findIndex((r) => r.chunkId === selected?.chunkId);
+    const next = stepIndex(results.length, current, event.key);
+    if (next === null) return;
+    event.preventDefault();
+    setSelected(results[next]);
+    const card = listRef.current?.querySelectorAll<HTMLElement>(
+      "[data-testid=result-card]",
+    )[next];
+    card?.scrollIntoView({ block: "nearest" });
+    if (!fromInput) card?.focus();
+  };
   const submit = (event: FormEvent) => {
     event.preventDefault();
     void runSearch();
@@ -422,6 +443,7 @@ function SearchView({
           ref={inputRef}
           value={query}
           onChange={(event) => setQuery(event.target.value)}
+          onKeyDown={(event) => moveSelection(event, true)}
           placeholder="Describe what you remember…"
           data-testid="search-input"
           aria-label="Search your library"
@@ -507,7 +529,11 @@ function SearchView({
             {results.length === 0 && !searching ? (
               <NoResults />
             ) : (
-              <div className="result-list">
+              <div
+                className="result-list"
+                ref={listRef}
+                onKeyDown={(event) => moveSelection(event, false)}
+              >
                 {results.map((result) => (
                   <ResultCard
                     key={result.chunkId}
@@ -556,6 +582,7 @@ function ResultCard({
     <button
       className={active ? "result-card active" : "result-card"}
       data-testid="result-card"
+      aria-current={active ? "true" : undefined}
       onClick={onClick}
     >
       <div className={`file-icon ${result.extension}`}>
