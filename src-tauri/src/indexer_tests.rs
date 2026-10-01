@@ -223,3 +223,71 @@ fn a_folder_added_during_a_pass_is_indexed_when_the_pass_finishes() {
         "the folder added mid-pass was never indexed"
     );
 }
+
+/// Each way Add folder can refuse says why, in words the user can act on -- and refuses before
+/// anything is saved, so a refused path never shows up in the library.
+#[test]
+fn add_folder_refuses_bad_paths_with_a_reason_and_saves_nothing() {
+    let scratch = Scratch::new("refusals");
+    // Adding a folder starts indexing; keep it off the network by making the model unloadable.
+    std::fs::create_dir_all(scratch.0.join("data")).unwrap();
+    std::fs::write(scratch.0.join("data/models"), b"not a directory").unwrap();
+    let state = AppState::open_headless(scratch.0.join("data")).unwrap();
+    let add = |path: &Path| crate::commands::add_library_folder(&state, &path.to_string_lossy());
+
+    let missing = scratch.0.join("no-such-folder");
+    assert!(add(&missing).unwrap_err().ends_with("does not exist"));
+
+    let file = fixtures().join("memo.txt");
+    assert!(add(&file).unwrap_err().contains("is a file"));
+
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let locked = scratch.0.join("locked");
+        std::fs::create_dir_all(&locked).unwrap();
+        std::fs::set_permissions(&locked, std::fs::Permissions::from_mode(0o000)).unwrap();
+        // Root reads anything, so this case only means something for an ordinary user.
+        if std::fs::read_dir(&locked).is_err() {
+            assert!(add(&locked).unwrap_err().contains("not allowed to read"));
+        }
+        std::fs::set_permissions(&locked, std::fs::Permissions::from_mode(0o700)).unwrap();
+    }
+
+    assert!(
+        state.settings().library_paths.is_empty(),
+        "a refused path was saved"
+    );
+
+    add(&fixtures()).unwrap();
+    assert!(add(&fixtures())
+        .unwrap_err()
+        .ends_with("is already in your library"));
+    assert_eq!(state.settings().library_paths.len(), 1);
+    while state.is_indexing() {
+        std::thread::sleep(std::time::Duration::from_millis(20));
+    }
+}
+
+/// A folder the user added is still there after the app restarts.
+#[test]
+fn library_folders_survive_a_restart() {
+    let scratch = Scratch::new("restart");
+    // Adding a folder starts indexing; keep it off the network by making the model unloadable.
+    std::fs::create_dir_all(scratch.0.join("data")).unwrap();
+    std::fs::write(scratch.0.join("data/models"), b"not a directory").unwrap();
+    let state = AppState::open_headless(scratch.0.join("data")).unwrap();
+    crate::commands::add_library_folder(&state, &fixtures().to_string_lossy()).unwrap();
+    while state.is_indexing() {
+        std::thread::sleep(std::time::Duration::from_millis(20));
+    }
+    state.shutdown();
+    drop(state);
+
+    let reopened = AppState::open_headless(scratch.0.join("data")).unwrap();
+    let expected = std::fs::canonicalize(fixtures()).unwrap();
+    assert_eq!(
+        reopened.settings().library_paths,
+        vec![expected.to_string_lossy().into_owned()]
+    );
+}
