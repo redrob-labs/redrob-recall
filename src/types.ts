@@ -38,6 +38,16 @@ export interface AppSnapshot {
   connection: ConnectionStatus;
   dataDirectory: string;
   appVersion: string;
+  /** One entry per library folder, in settings order. */
+  folders: FolderStatus[];
+}
+
+/** `present` is false when the folder is gone: the watcher skips it, so it is not watched. */
+export interface FolderStatus {
+  path: string;
+  present: boolean;
+  files: number;
+  failed: number;
 }
 
 export interface SearchFilters {

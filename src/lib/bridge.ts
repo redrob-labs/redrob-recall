@@ -125,6 +125,12 @@ function mockSnapshot(): AppSnapshot {
     dataDirectory: "~/.redrob/recall",
     // Read from the manifest the release bumps, so the demo cannot drift from the shipped version.
     appVersion: packageJson.version,
+    folders: mockSettings.libraryPaths.map((path) => ({
+      path,
+      present: true,
+      files: demoEnabled ? 12481 : 0,
+      failed: demoEnabled ? 3 : 0,
+    })),
   };
 }
 

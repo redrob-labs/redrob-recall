@@ -137,8 +137,11 @@ impl AppState {
         } else {
             IndexStatus::Idle
         };
+        let settings = self.settings();
+        let folders = self.0.storage.folder_stats(&settings.library_paths)?;
         Ok(AppSnapshot {
-            settings: self.settings(),
+            folders,
+            settings,
             stats: self
                 .0
                 .storage

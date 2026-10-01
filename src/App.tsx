@@ -979,27 +979,55 @@ function SourcesView({
           </div>
         </div>
         <div className="folder-list">
-          {snapshot.settings.libraryPaths.map((path) => (
-            <div className="folder-row" key={path}>
-              <span className="folder-icon">
-                <Icon name="folder" size={24} />
-              </span>
-              <div>
-                <strong>{lastPathPart(path)}</strong>
-                <span>{path}</span>
-              </div>
-              <span className="watching">
-                <span className="status-dot" /> Watching
-              </span>
-              <button
-                className="icon-button danger"
-                title="Remove folder"
-                onClick={() => void removeFolder(path)}
+          {snapshot.settings.libraryPaths.map((path) => {
+            const folder = snapshot.folders.find((f) => f.path === path);
+            const missing = folder ? !folder.present : false;
+            const paused = snapshot.stats.status === "paused";
+            return (
+              <div
+                className="folder-row"
+                key={path}
+                data-missing={missing || undefined}
               >
-                <Icon name="trash" />
-              </button>
-            </div>
-          ))}
+                <span className="folder-icon">
+                  <Icon name="folder" size={24} />
+                </span>
+                <div>
+                  <strong>{lastPathPart(path)}</strong>
+                  <span>{path}</span>
+                  {folder && !missing && (
+                    <span className="folder-count">
+                      {folder.files.toLocaleString()}{" "}
+                      {folder.files === 1 ? "file" : "files"}
+                      {folder.failed > 0 &&
+                        ` · ${folder.failed.toLocaleString()} failed`}
+                    </span>
+                  )}
+                </div>
+                {/* Only a folder that is there is watched: indexer.rs skips one that is gone. */}
+                <span
+                  className="watching"
+                  data-state={
+                    missing ? "missing" : paused ? "paused" : "watching"
+                  }
+                >
+                  <span className="status-dot" />{" "}
+                  {missing
+                    ? "Folder not found"
+                    : paused
+                      ? "Paused"
+                      : "Watching"}
+                </span>
+                <button
+                  className="icon-button danger"
+                  title="Remove folder"
+                  onClick={() => void removeFolder(path)}
+                >
+                  <Icon name="trash" />
+                </button>
+              </div>
+            );
+          })}
         </div>
       </section>
       <section className="source-section">
