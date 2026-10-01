@@ -2110,3 +2110,24 @@ kbd {
   font-weight: 800;
   letter-spacing: 0.09em;
 }
+
+/* The stack ignores the pointer so it never blocks the page; a dismiss button has to opt back in. */
+.toast-dismiss {
+  pointer-events: auto;
+  display: inline-flex;
+  margin-left: auto;
+  padding: 2px;
+  border: 0;
+  border-radius: 4px;
+  color: var(--ink-muted);
+  background: transparent;
+  cursor: pointer;
+}
+.toast-dismiss:hover,
+.toast-dismiss:focus-visible {
+  color: var(--ink-primary);
+  background: var(--surface-sunken);
+}
+.toast span {
+  overflow-wrap: anywhere;
+}
