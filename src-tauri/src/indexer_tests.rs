@@ -10,6 +10,17 @@ use std::sync::atomic::{AtomicU32, Ordering};
 use crate::models::{SearchFilters, SearchRequest};
 use crate::state::AppState;
 
+/// Held by every test that loads the real embedding model. The app builds one embedder per process;
+/// these tests built up to four at once, and on CI runners (never locally, 12 runs) one of them left
+/// a file or two without vectors. Loading one at a time is what the app does anyway.
+static MODEL: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+fn model_lock() -> std::sync::MutexGuard<'static, ()> {
+    MODEL
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+}
+
 /// (file, a word only that file contains)
 const FIXTURES: &[(&str, &str)] = &[
     ("notes.md", "marmalade"),
@@ -76,6 +87,7 @@ fn hits(state: &AppState, word: &str) -> Vec<String> {
 /// `target/` so it is paid once per checkout, not once per run.
 #[test]
 fn every_format_is_searchable_after_a_full_index() {
+    let _model = model_lock();
     let scratch = Scratch::new("formats");
     let models = Path::new(env!("CARGO_MANIFEST_DIR")).join("target/test-model-cache");
     std::fs::create_dir_all(&models).unwrap();
@@ -104,6 +116,7 @@ fn every_format_is_searchable_after_a_full_index() {
 /// unavailable; indexing has to keep the keywords for that fallback to have anything to find.
 #[test]
 fn library_stays_keyword_searchable_when_the_embedding_model_is_unavailable() {
+    let _model = model_lock();
     let scratch = Scratch::new("offline");
     // A file where the model cache directory should be: fastembed cannot create its cache, so
     // loading the model fails the same way an unreachable download does, with no network involved.
@@ -176,6 +189,7 @@ fn library_stays_keyword_searchable_when_the_embedding_model_is_unavailable() {
 /// answered "already indexing" and dropped.
 #[test]
 fn a_folder_added_during_a_pass_is_indexed_when_the_pass_finishes() {
+    let _model = model_lock();
     let scratch = Scratch::new("midpass");
     let models = Path::new(env!("CARGO_MANIFEST_DIR")).join("target/test-model-cache");
     std::fs::create_dir_all(&models).unwrap();
@@ -301,10 +315,56 @@ fn library_folders_survive_a_restart() {
     );
 }
 
+/// The watcher picks up a file created, edited and deleted in a watched folder, with no Check now.
+#[test]
+fn the_watcher_reflects_created_edited_and_deleted_files() {
+    let scratch = Scratch::new("watcher");
+    // Keyword search is enough to observe the watcher; keep the model out of it.
+    std::fs::create_dir_all(scratch.0.join("data")).unwrap();
+    std::fs::write(scratch.0.join("data/models"), b"not a directory").unwrap();
+    let library = scratch.0.join("library");
+    std::fs::create_dir_all(&library).unwrap();
+    std::fs::write(library.join("seed.md"), "The seed file.\n").unwrap();
+
+    let state = state_indexing(&scratch, &library); // update_settings also starts the watcher
+    super::run_full_index(&state).unwrap();
+    let stored = |word: &str| state.storage().keyword_search(word, 10).unwrap().len();
+    let wait_for = |what: &str, done: &dyn Fn() -> bool| {
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
+        while !done() {
+            assert!(
+                std::time::Instant::now() < deadline,
+                "the watcher never {what}"
+            );
+            std::thread::sleep(std::time::Duration::from_millis(100));
+        }
+    };
+
+    let file = library.join("arrived.md");
+    std::fs::write(&file, "A lavender submarine surfaced.\n").unwrap();
+    wait_for("indexed a new file", &|| stored("lavender") == 1);
+
+    std::fs::write(
+        &file,
+        "It was a turquoise submarine after all, said the log.\n",
+    )
+    .unwrap();
+    wait_for("re-read an edited file", &|| {
+        stored("turquoise") == 1 && stored("lavender") == 0
+    });
+
+    std::fs::remove_file(&file).unwrap();
+    wait_for("dropped a deleted file", &|| stored("turquoise") == 0);
+    while state.is_indexing() {
+        std::thread::sleep(std::time::Duration::from_millis(20));
+    }
+}
+
 /// Check now re-reads what changed and nothing else, and forgets what was deleted. Observed through
 /// chunk ids: an unchanged file keeps its ids, a re-read file gets new ones.
 #[test]
 fn a_second_pass_rereads_only_changed_files_and_drops_deleted_ones() {
+    let _model = model_lock();
     let scratch = Scratch::new("incremental");
     // The real model: without vectors every file stays due for re-indexing by design (see the
     // offline test), which would make "unchanged" unobservable.

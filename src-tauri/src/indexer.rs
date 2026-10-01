@@ -28,13 +28,16 @@ pub fn configure_watcher(state: &AppState) -> Result<()> {
         if !event.kind.is_create() && !event.kind.is_modify() && !event.kind.is_remove() {
             return;
         }
-        if state_for_callback.is_indexing() || state_for_callback.is_paused() {
+        if state_for_callback.is_paused() {
             return;
         }
+        // A change during a pass used to be dropped here (`is_indexing` -> return): a file saved
+        // after the pass had walked past it stayed stale until some later change. Queue it
+        // instead; `request_index` collapses a burst of events into at most one more pass.
         let state = state_for_callback.clone();
         tauri::async_runtime::spawn(async move {
             tokio::time::sleep(Duration::from_millis(900)).await;
-            let _ = start_full_index(state).await;
+            request_index(&state);
         });
     })?;
     for library_path in state.settings().library_paths {
