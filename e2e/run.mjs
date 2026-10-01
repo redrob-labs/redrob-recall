@@ -4,14 +4,18 @@
 //   onboarding -> Choose folders -> indexing finishes -> search a word only one fixture has
 //   -> that fixture is the result on screen
 //
-// No test framework. WebdriverIO was tried first and brings 13 high-severity advisories through
-// extract-zip that no override reaches; the W3C protocol needs a handful of HTTP calls, so this
-// speaks it directly with fetch.
+// Elements are reached with `execute/sync` (a script run in the page), not WebDriver element
+// lookup. On WebKitWebDriver every lookup failed on this app: XPath answered "no such element" for a
+// button present in the page source it returned, and CSS selectors -- quoted or not -- were rejected
+// as "invalid selector: The string did not match the expected pattern". The script path is the same
+// DOM the user sees, and screenshots still come from the driver.
 //
-// Needs: tauri-driver listening on WEBDRIVER_URL (default http://127.0.0.1:4444), an app binary
-// built with `--features e2e` at APP, and REDROB_E2E_FOLDER pointing at the fixture library (the
-// e2e feature makes Choose folders answer with it instead of opening the native picker).
-// Writes screenshots to SHOTS (default e2e/screenshots).
+// No test framework: WebdriverIO 9.32.0 carried 13 high-severity advisories through extract-zip that
+// no override reaches, for what is a handful of HTTP calls.
+//
+// Needs: tauri-driver on WEBDRIVER_URL (default http://127.0.0.1:4444), an app built with
+// `--features e2e` at APP, and REDROB_E2E_FOLDER pointing at the fixture library. Screenshots go to
+// SHOTS (default e2e/screenshots).
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
@@ -39,26 +43,36 @@ async function wd(method, path, body) {
   return json.value;
 }
 
-const ELEMENT = "element-6066-11e4-a52f-4ce07a7cf2a8";
 let session;
-const find = async (xpath) =>
-  (
-    await wd("POST", `/session/${session}/element`, {
-      using: "xpath",
-      value: xpath,
-    })
-  )[ELEMENT];
-const findAll = async (xpath) =>
-  (
-    await wd("POST", `/session/${session}/elements`, {
-      using: "xpath",
-      value: xpath,
-    })
-  ).map((e) => e[ELEMENT]);
-const click = (id) => wd("POST", `/session/${session}/element/${id}/click`, {});
-const type = (id, text) =>
-  wd("POST", `/session/${session}/element/${id}/value`, { text });
-const textOf = (id) => wd("GET", `/session/${session}/element/${id}/text`);
+/** Run `body` in the page with `args`; returns its JSON-serialisable result. */
+const js = (body, ...args) =>
+  wd("POST", `/session/${session}/execute/sync`, { script: body, args });
+
+/** Text of the element with this data-testid, or null when it is not on screen. */
+const text = (id) =>
+  js(
+    "const el = document.querySelector('[data-testid=' + arguments[0] + ']'); return el ? el.textContent : null;",
+    id,
+  );
+/** Click the element with this data-testid; false when it is not on screen. */
+const click = (id) =>
+  js(
+    "const el = document.querySelector('[data-testid=' + arguments[0] + ']'); if (!el || el.disabled) return false; el.click(); return true;",
+    id,
+  );
+/** Type into a React-controlled field: set through the native setter, then fire `input`. */
+const fill = (id, value) =>
+  js(
+    `const el = document.querySelector('[data-testid=' + arguments[0] + ']');
+     if (!el) return false;
+     const proto = el instanceof HTMLTextAreaElement ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype;
+     Object.getOwnPropertyDescriptor(proto, 'value').set.call(el, arguments[1]);
+     el.dispatchEvent(new Event('input', { bubbles: true }));
+     return true;`,
+    id,
+    value,
+  );
+
 async function shot(name) {
   const png = await wd("GET", `/session/${session}/screenshot`);
   writeFileSync(join(SHOTS, `${name}.png`), Buffer.from(png, "base64"));
@@ -71,7 +85,6 @@ async function until(what, check, seconds = 120) {
       const value = await check();
       if (value) return value;
     } catch (error) {
-      // Kept, because "timed out" alone hid the reason on the first CI run.
       last = error.message;
     }
     if (Date.now() > deadline)
@@ -88,43 +101,44 @@ try {
     })
   ).sessionId;
 
-  const choose = await until("the onboarding screen", () =>
-    find("[data-testid=choose-folders]"),
+  await until(
+    "the onboarding screen",
+    async () => (await text("choose-folders")) !== null,
   );
   await shot("1-onboarding");
-  await click(choose);
+  await until("Choose folders to accept a click", () =>
+    click("choose-folders"),
+  );
 
   // The main shell replaces onboarding once a folder is saved.
-  const box = await until("the main shell", () =>
-    find("[data-testid=search-input]"),
+  await until(
+    "the main shell",
+    async () => (await text("search-input")) !== null,
   );
   // Indexing is finished when the sidebar counts the six fixtures and its status is idle.
   await until(
     "indexing to finish",
-    async () => {
-      const count = (
-        await textOf(await find("[data-testid=library-count]"))
-      ).trim();
-      const status = await find(
-        "[data-testid=library-status][data-status=idle]",
-      );
-      return count === "6 files" && status;
-    },
+    () =>
+      js(
+        "const c = document.querySelector('[data-testid=library-count]'); const s = document.querySelector('[data-testid=library-status]'); return !!c && !!s && c.textContent.trim() === '6 files' && s.dataset.status === 'idle';",
+      ),
     300,
   );
   await shot("2-indexed");
 
   // "saffron" is in minutes.docx and in no other fixture.
-  await type(box, "saffron");
-  await click(await find("[data-testid=search-submit]"));
-  const first = await until("a search result", async () => {
-    const cards = await findAll("[data-testid=result-card]");
-    return cards.length ? cards[0] : false;
-  });
+  await until("the search box to take input", () =>
+    fill("search-input", "saffron"),
+  );
+  await until("Search to accept a click", () => click("search-submit"));
+  const first = await until("a search result", () =>
+    js(
+      "const el = document.querySelector('[data-testid=result-card]'); return el ? el.textContent : null;",
+    ),
+  );
   await shot("3-results");
-  const text = await textOf(first);
-  if (!text.includes("minutes.docx"))
-    throw new Error(`first result is not minutes.docx: ${text}`);
+  if (!first.includes("minutes.docx"))
+    throw new Error(`first result is not minutes.docx: ${first}`);
   console.log(
     "e2e: onboarding -> folder -> indexed 6 files -> 'saffron' -> minutes.docx",
   );
