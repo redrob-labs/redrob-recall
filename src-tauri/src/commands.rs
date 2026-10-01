@@ -35,11 +35,15 @@ pub fn add_library_path(path: String, state: State<'_, AppState>) -> Result<(), 
     }
     let mut settings = state.settings();
     let path = canonical.to_string_lossy().to_string();
-    if !settings.library_paths.contains(&path) {
-        settings.library_paths.push(path);
-        settings.library_paths.sort();
+    if settings.library_paths.contains(&path) {
+        return Err(format!("{path} is already in your library"));
     }
-    state.update_settings(settings).map_err(command_error)
+    settings.library_paths.push(path);
+    settings.library_paths.sort();
+    state.update_settings(settings).map_err(command_error)?;
+    // A folder that is added must be read, whether or not a pass is running right now.
+    indexer::request_index(state.inner());
+    Ok(())
 }
 
 #[tauri::command]
@@ -69,18 +73,8 @@ pub fn remove_library_path(path: String, state: State<'_, AppState>) -> Result<(
 
 #[tauri::command]
 pub fn start_indexing(state: State<'_, AppState>) -> Result<bool, String> {
-    if state.is_indexing() {
-        return Ok(false);
-    }
-    let state = state.inner().clone();
-    tauri::async_runtime::spawn(async move {
-        if let Err(error) = indexer::start_full_index(state.clone()).await {
-            tracing::error!(%error, "indexing failed");
-            state.set_indexing(false);
-            state.emit_snapshot();
-        }
-    });
-    Ok(true)
+    // `false` now means "queued behind the running pass", not "ignored".
+    Ok(indexer::request_index(state.inner()))
 }
 
 #[tauri::command]

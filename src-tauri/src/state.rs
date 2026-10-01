@@ -29,6 +29,9 @@ struct Inner {
     pub settings: RwLock<AppSettings>,
     pub api_key: RwLock<Option<String>>,
     pub indexing: AtomicBool,
+    /// Set when an index was asked for while one was already running, so the running pass runs
+    /// once more when it finishes instead of the request being dropped.
+    pub rescan_requested: AtomicBool,
     pub paused: AtomicBool,
     pub shutting_down: AtomicBool,
     pub current_file: RwLock<Option<String>>,
@@ -92,6 +95,7 @@ impl AppState {
             settings: RwLock::new(settings),
             api_key: RwLock::new(api_key),
             indexing: AtomicBool::new(false),
+            rescan_requested: AtomicBool::new(false),
             paused: AtomicBool::new(false),
             shutting_down: AtomicBool::new(false),
             current_file: RwLock::new(None),
@@ -231,6 +235,15 @@ impl AppState {
             self.0.indexing.store(false, Ordering::SeqCst);
             true
         }
+    }
+
+    pub fn request_rescan(&self) {
+        self.0.rescan_requested.store(true, Ordering::SeqCst);
+    }
+
+    /// Consume a pending rescan request.
+    pub fn take_rescan_request(&self) -> bool {
+        self.0.rescan_requested.swap(false, Ordering::SeqCst)
     }
 
     pub fn is_indexing(&self) -> bool {

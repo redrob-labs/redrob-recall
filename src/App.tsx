@@ -215,8 +215,8 @@ function Onboarding({
       setAdding(true);
       const path = await bridge.chooseFolder();
       if (!path) return;
+      // Adding a folder schedules its indexing on the desktop side, even mid-pass.
       await bridge.addLibraryPath(path);
-      await bridge.startIndexing();
       await refresh();
       notify("Folder added. Local indexing has started.", "success");
     } catch (error) {
@@ -827,9 +827,8 @@ function SourcesView({
       const path = await bridge.chooseFolder();
       if (!path) return;
       await bridge.addLibraryPath(path);
-      await bridge.startIndexing();
       await refresh();
-      notify("Source folder added.", "success");
+      notify("Source folder added. It will be indexed next.", "success");
     } catch (error) {
       notify(readError(error), "error");
     }
@@ -888,7 +887,16 @@ function SourcesView({
             onClick={() =>
               void bridge
                 .startIndexing()
-                .then(refresh)
+                .then((started) => {
+                  // `false` means a pass is already running; it will run again after it.
+                  notify(
+                    started
+                      ? "Checking your library for changes."
+                      : "Indexing is in progress; your library will be checked again when it finishes.",
+                    "success",
+                  );
+                  return refresh();
+                })
                 .catch((error) => notify(readError(error), "error"))
             }
           >

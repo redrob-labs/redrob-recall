@@ -141,11 +141,12 @@ export const bridge = {
   },
   async addLibraryPath(path: string): Promise<void> {
     if (isDesktop) return invoke("add_library_path", { path });
-    if (!mockSettings.libraryPaths.includes(path))
-      mockSettings = {
-        ...mockSettings,
-        libraryPaths: [...mockSettings.libraryPaths, path],
-      };
+    if (mockSettings.libraryPaths.includes(path))
+      throw new Error(`${path} is already in your library`);
+    mockSettings = {
+      ...mockSettings,
+      libraryPaths: [...mockSettings.libraryPaths, path],
+    };
   },
   async removeLibraryPath(path: string): Promise<void> {
     if (isDesktop) return invoke("remove_library_path", { path });

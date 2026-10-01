@@ -161,3 +161,65 @@ fn library_stays_keyword_searchable_when_the_embedding_model_is_unavailable() {
         "the run after the model became available must embed every file"
     );
 }
+
+/// A folder added while a pass is running gets indexed by that run, not left until the next manual
+/// check. This was the shape of "I added a folder and nothing got indexed": the second request was
+/// answered "already indexing" and dropped.
+#[test]
+fn a_folder_added_during_a_pass_is_indexed_when_the_pass_finishes() {
+    let scratch = Scratch::new("midpass");
+    let models = Path::new(env!("CARGO_MANIFEST_DIR")).join("target/test-model-cache");
+    std::fs::create_dir_all(&models).unwrap();
+    std::fs::create_dir_all(scratch.0.join("data")).unwrap();
+    #[cfg(unix)]
+    std::os::unix::fs::symlink(&models, scratch.0.join("data/models")).unwrap();
+
+    // Second folder, with a word the fixtures do not contain.
+    let late = scratch.0.join("late");
+    std::fs::create_dir_all(&late).unwrap();
+    std::fs::write(
+        late.join("late.md"),
+        "The periwinkle zeppelin docked at noon.\n",
+    )
+    .unwrap();
+
+    let state = state_indexing(&scratch, &fixtures());
+    assert!(
+        super::request_index(&state),
+        "nothing was running, so a pass must start"
+    );
+
+    // Wait until the pass is past its settings read -- it is on a file -- so the folder below
+    // cannot be picked up by this pass and only the queued re-run can find it.
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(120);
+    while state.snapshot().unwrap().stats.current_file.is_none() {
+        assert!(
+            std::time::Instant::now() < deadline,
+            "the first pass never reached a file"
+        );
+        std::thread::sleep(std::time::Duration::from_millis(5));
+    }
+    let mut settings = state.settings();
+    settings
+        .library_paths
+        .push(late.to_string_lossy().into_owned());
+    state.update_settings(settings).unwrap();
+    assert!(
+        !super::request_index(&state),
+        "a pass is running, so this request must be queued"
+    );
+
+    while state.is_indexing() {
+        assert!(
+            std::time::Instant::now() < deadline,
+            "indexing never finished"
+        );
+        std::thread::sleep(std::time::Duration::from_millis(20));
+    }
+    assert!(
+        hits(&state, "periwinkle")
+            .iter()
+            .any(|name| name == "late.md"),
+        "the folder added mid-pass was never indexed"
+    );
+}
