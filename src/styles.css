@@ -1363,6 +1363,21 @@ kbd {
   font-size: 9px;
   font-weight: 700;
 }
+.watching[data-state="paused"] {
+  color: var(--status-warning);
+}
+.watching[data-state="missing"] {
+  color: var(--status-danger);
+}
+.watching[data-state="paused"] .status-dot,
+.watching[data-state="missing"] .status-dot {
+  background: currentColor;
+}
+.folder-count {
+  display: block;
+  color: var(--muted);
+  font-size: 11px;
+}
 .document-table {
   overflow: hidden;
   border: 1px solid var(--line);

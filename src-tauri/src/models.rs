@@ -140,6 +140,19 @@ pub struct AppSnapshot {
     pub connection: ConnectionStatus,
     pub data_directory: String,
     pub app_version: String,
+    /// One entry per library folder, in settings order.
+    pub folders: Vec<FolderStatus>,
+}
+
+/// What one library folder holds. `present` is false when the folder is gone or not a directory:
+/// the watcher skips such a folder, so the screen must not call it watched.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct FolderStatus {
+    pub path: String,
+    pub present: bool,
+    pub files: u64,
+    pub failed: u64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
