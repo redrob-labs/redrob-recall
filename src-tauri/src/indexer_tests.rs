@@ -127,7 +127,7 @@ fn library_stays_keyword_searchable_when_the_embedding_model_is_unavailable() {
 
     // Leaving vectors `pending` is only half the fix: the next run, with the model reachable, has to
     // pick those files up again rather than treat them as done.
-    let stale = |state: &AppState| {
+    let stale_files = |state: &AppState| {
         FIXTURES
             .iter()
             .filter(|(file, _)| {
@@ -139,8 +139,10 @@ fn library_stays_keyword_searchable_when_the_embedding_model_is_unavailable() {
                     .document_is_current(&path.to_string_lossy(), &modified, metadata.len())
                     .unwrap()
             })
-            .count()
+            .map(|(file, _)| *file)
+            .collect::<Vec<_>>()
     };
+    let stale = |state: &AppState| stale_files(state).len();
     assert_eq!(
         stale(&state),
         FIXTURES.len(),
@@ -155,10 +157,17 @@ fn library_stays_keyword_searchable_when_the_embedding_model_is_unavailable() {
     std::os::unix::fs::symlink(&models, scratch.0.join("data/models")).unwrap();
     let state = AppState::open_headless(scratch.0.join("data")).unwrap();
     super::run_full_index(&state).unwrap();
-    assert_eq!(
-        stale(&state),
-        0,
-        "the run after the model became available must embed every file"
+    // Failed once on a CI runner and never locally (12 runs, including pinned to one CPU), so when
+    // it fails it says which file and whether the model can be loaded at all at that moment.
+    let left = stale_files(&state);
+    assert!(
+        left.is_empty(),
+        "the run after the model became available left {left:?} without vectors; \
+         the model {}",
+        match state.embedder().embed_query("probe") {
+            Ok(_) => "loads now".to_string(),
+            Err(error) => format!("does not load: {error:#}"),
+        }
     );
 }
 
