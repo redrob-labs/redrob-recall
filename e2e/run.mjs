@@ -89,24 +89,24 @@ try {
   ).sessionId;
 
   const choose = await until("the onboarding screen", () =>
-    find('[data-testid="choose-folders"]'),
+    find("[data-testid=choose-folders]"),
   );
   await shot("1-onboarding");
   await click(choose);
 
   // The main shell replaces onboarding once a folder is saved.
   const box = await until("the main shell", () =>
-    find('[data-testid="search-input"]'),
+    find("[data-testid=search-input]"),
   );
   // Indexing is finished when the sidebar counts the six fixtures and its status is idle.
   await until(
     "indexing to finish",
     async () => {
       const count = (
-        await textOf(await find('[data-testid="library-count"]'))
+        await textOf(await find("[data-testid=library-count]"))
       ).trim();
       const status = await find(
-        '[data-testid="library-status"][data-status="idle"]',
+        "[data-testid=library-status][data-status=idle]",
       );
       return count === "6 files" && status;
     },
@@ -116,9 +116,9 @@ try {
 
   // "saffron" is in minutes.docx and in no other fixture.
   await type(box, "saffron");
-  await click(await find('[data-testid="search-submit"]'));
+  await click(await find("[data-testid=search-submit]"));
   const first = await until("a search result", async () => {
-    const cards = await findAll('[data-testid="result-card"]');
+    const cards = await findAll("[data-testid=result-card]");
     return cards.length ? cards[0] : false;
   });
   await shot("3-results");
