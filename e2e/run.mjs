@@ -89,42 +89,36 @@ try {
   ).sessionId;
 
   const choose = await until("the onboarding screen", () =>
-    find("//button[.//text()[contains(., 'Choose folders')]]"),
+    find('[data-testid="choose-folders"]'),
   );
   await shot("1-onboarding");
   await click(choose);
 
   // The main shell replaces onboarding once a folder is saved.
-  await until("the main shell", () =>
-    find("//textarea[@placeholder='Describe what you remember…']"),
+  const box = await until("the main shell", () =>
+    find('[data-testid="search-input"]'),
   );
-  // Indexing is finished when the sidebar shows the six fixtures and its status reads ready
-  // (CSS uppercases it, so compare case-insensitively).
+  // Indexing is finished when the sidebar counts the six fixtures and its status is idle.
   await until(
     "indexing to finish",
     async () => {
-      const count = await find("//strong[normalize-space(.)='6 files']");
+      const count = (
+        await textOf(await find('[data-testid="library-count"]'))
+      ).trim();
       const status = await find(
-        "//*[contains(translate(normalize-space(.), 'LIBRAYDE', 'librayde'), 'library ready')][not(*)]",
+        '[data-testid="library-status"][data-status="idle"]',
       );
-      return count && status;
+      return count === "6 files" && status;
     },
     300,
   );
   await shot("2-indexed");
 
-  const box = await find(
-    "//textarea[@placeholder='Describe what you remember…']",
-  );
   // "saffron" is in minutes.docx and in no other fixture.
   await type(box, "saffron");
-  await click(
-    await find(
-      "//button[contains(@class, 'search-submit') and @aria-label='Search']",
-    ),
-  );
+  await click(await find('[data-testid="search-submit"]'));
   const first = await until("a search result", async () => {
-    const cards = await findAll("//*[contains(@class, 'result-card')]");
+    const cards = await findAll('[data-testid="result-card"]');
     return cards.length ? cards[0] : false;
   });
   await shot("3-results");
