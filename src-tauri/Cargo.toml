@@ -60,3 +60,10 @@ lto = "thin"
 opt-level = "s"
 panic = "abort"
 strip = true
+
+[features]
+# End-to-end tests only. The native folder picker cannot be driven over WebDriver, so with this
+# feature `choose_library_folder` answers with $REDROB_E2E_FOLDER. Off by default: release builds
+# never pass it, and scripts/check-e2e-feature.mjs fails the release if one ever does.
+e2e = []
+

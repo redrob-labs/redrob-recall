@@ -31,9 +31,16 @@ pub fn run() {
         }))
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
-        .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_process::init())
         .setup(|app| {
+            // Only release builds carry `plugins.updater` (scripts/prepare-release-config.mjs adds
+            // the endpoint and public key). Registering the plugin without it panics at startup with
+            // "invalid type: null, expected struct Config", so every dev, debug and e2e build of the
+            // app crashed before opening a window.
+            if app.config().plugins.0.contains_key("updater") {
+                app.handle()
+                    .plugin(tauri_plugin_updater::Builder::new().build())?;
+            }
             let handle = app.handle().clone();
             let app_state = AppState::initialize(handle.clone())?;
             app.manage(app_state.clone());

@@ -193,9 +193,16 @@ function Sidebar({
               snapshot.stats.status === "indexing" ? "pulse-dot" : "status-dot"
             }
           />
-          <span>{statusLabel(snapshot.stats.status)}</span>
+          <span
+            data-testid="library-status"
+            data-status={snapshot.stats.status}
+          >
+            {statusLabel(snapshot.stats.status)}
+          </span>
         </div>
-        <strong>{formatNumber(snapshot.stats.documents)} files</strong>
+        <strong data-testid="library-count">
+          {formatNumber(snapshot.stats.documents)} files
+        </strong>
         <span>{formatBytes(snapshot.stats.totalBytes)} indexed locally</span>
       </div>
       <button
@@ -259,6 +266,7 @@ function Onboarding({
           </p>
           <button
             className="primary large"
+            data-testid="choose-folders"
             onClick={() => void addFolder()}
             disabled={adding}
           >
@@ -411,6 +419,7 @@ function SearchView({
           value={query}
           onChange={(event) => setQuery(event.target.value)}
           placeholder="Describe what you remember…"
+          data-testid="search-input"
           aria-label="Search your library"
         />
         <kbd>⌘ K</kbd>
@@ -432,6 +441,7 @@ function SearchView({
         )}
         <button
           className="search-submit"
+          data-testid="search-submit"
           aria-label={searching ? "Searching" : "Search"}
           disabled={searching || !query.trim()}
         >
@@ -539,6 +549,7 @@ function ResultCard({
   return (
     <button
       className={active ? "result-card active" : "result-card"}
+      data-testid="result-card"
       onClick={onClick}
     >
       <div className={`file-icon ${result.extension}`}>

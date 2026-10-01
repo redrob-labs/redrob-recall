@@ -1,0 +1,90 @@
+name: E2E
+
+# The desktop app, driven the way a user drives it: first-run screen -> Choose folders -> indexing
+# -> search -> the right file on screen. Unit and integration tests run the Rust core; this is the
+# only check that the window, the bridge and the core work together.
+
+on:
+  pull_request:
+  push:
+    branches: [develop, main]
+
+permissions:
+  contents: read
+
+jobs:
+  desktop:
+    name: Desktop user path over WebDriver
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - name: Check out source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Install Linux desktop and WebDriver dependencies
+        run: >-
+          sudo apt-get update && sudo apt-get install -y
+          libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev
+          patchelf libssl-dev webkit2gtk-driver xvfb
+
+      - name: Set up Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable
+        with:
+          toolchain: 1.95.0
+
+      - name: Install pinned tauri-driver
+        run: cargo install tauri-driver --version 2.1.0 --locked
+
+      - name: Install locked JavaScript dependencies
+        run: npm ci
+
+      - name: Cache the embedding model
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: e2e-home/.redrob/recall/models
+          key: embedding-model-e2e-${{ hashFiles('src-tauri/src/embedding.rs') }}
+
+      # A debug build with the e2e hook. Release builds never pass this feature, and every release
+      # leg proves the hook is absent from the binary it ships.
+      - name: Build the app with the end-to-end hook
+        run: npx tauri build --debug --no-bundle --features e2e
+
+      - name: Prove the probe can see the hook in this build
+        run: node scripts/check-e2e-feature.mjs src-tauri/target/debug/redrob-recall --expect-present
+
+      - name: Drive the desktop app
+        env:
+          APP: ${{ github.workspace }}/src-tauri/target/debug/redrob-recall
+          REDROB_E2E_FOLDER: ${{ github.workspace }}/src-tauri/tests/fixtures/library
+          SHOTS: ${{ github.workspace }}/e2e/screenshots
+          # A home of its own, so the library and model live where the cache step put them.
+          HOME: ${{ github.workspace }}/e2e-home
+          # Software rendering on a virtual display; the DMA-BUF path needs a GPU the runner lacks.
+          WEBKIT_DISABLE_DMABUF_RENDERER: "1"
+        run: |
+          mkdir -p "$HOME"
+          xvfb-run --auto-servernum --server-args="-screen 0 1280x800x24" bash -c '
+            tauri-driver --port 4444 > e2e/tauri-driver.log 2>&1 &
+            driver=$!
+            for _ in $(seq 1 50); do curl -fs http://127.0.0.1:4444/status >/dev/null && break; sleep 0.2; done
+            node e2e/run.mjs
+            status=$?
+            kill $driver
+            exit $status
+          '
+
+      - name: Keep the screenshots and driver log
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: e2e-desktop
+          path: |
+            e2e/screenshots
+            e2e/tauri-driver.log
+          if-no-files-found: warn
