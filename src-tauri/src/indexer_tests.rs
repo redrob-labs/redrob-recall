@@ -10,6 +10,17 @@ use std::sync::atomic::{AtomicU32, Ordering};
 use crate::models::{SearchFilters, SearchRequest};
 use crate::state::AppState;
 
+/// Held by every test that loads the real embedding model. The app builds one embedder per process;
+/// these tests built up to four at once, and on CI runners (never locally, 12 runs) one of them left
+/// a file or two without vectors. Loading one at a time is what the app does anyway.
+static MODEL: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+fn model_lock() -> std::sync::MutexGuard<'static, ()> {
+    MODEL
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+}
+
 /// (file, a word only that file contains)
 const FIXTURES: &[(&str, &str)] = &[
     ("notes.md", "marmalade"),
@@ -76,6 +87,7 @@ fn hits(state: &AppState, word: &str) -> Vec<String> {
 /// `target/` so it is paid once per checkout, not once per run.
 #[test]
 fn every_format_is_searchable_after_a_full_index() {
+    let _model = model_lock();
     let scratch = Scratch::new("formats");
     let models = Path::new(env!("CARGO_MANIFEST_DIR")).join("target/test-model-cache");
     std::fs::create_dir_all(&models).unwrap();
@@ -104,6 +116,7 @@ fn every_format_is_searchable_after_a_full_index() {
 /// unavailable; indexing has to keep the keywords for that fallback to have anything to find.
 #[test]
 fn library_stays_keyword_searchable_when_the_embedding_model_is_unavailable() {
+    let _model = model_lock();
     let scratch = Scratch::new("offline");
     // A file where the model cache directory should be: fastembed cannot create its cache, so
     // loading the model fails the same way an unreachable download does, with no network involved.
@@ -176,6 +189,7 @@ fn library_stays_keyword_searchable_when_the_embedding_model_is_unavailable() {
 /// answered "already indexing" and dropped.
 #[test]
 fn a_folder_added_during_a_pass_is_indexed_when_the_pass_finishes() {
+    let _model = model_lock();
     let scratch = Scratch::new("midpass");
     let models = Path::new(env!("CARGO_MANIFEST_DIR")).join("target/test-model-cache");
     std::fs::create_dir_all(&models).unwrap();
@@ -350,6 +364,7 @@ fn the_watcher_reflects_created_edited_and_deleted_files() {
 /// chunk ids: an unchanged file keeps its ids, a re-read file gets new ones.
 #[test]
 fn a_second_pass_rereads_only_changed_files_and_drops_deleted_ones() {
+    let _model = model_lock();
     let scratch = Scratch::new("incremental");
     // The real model: without vectors every file stays due for re-indexing by design (see the
     // offline test), which would make "unchanged" unobservable.
