@@ -1616,7 +1616,14 @@ function ProgressBar({ progress }: { progress: IndexProgress }) {
         <Loader size="sm" label={progress.message} />
         <div>
           <strong>{progress.message}</strong>
-          <span>{progress.currentFile ?? "Scanning folders"}</span>
+          <span>
+            {progress.currentFile ??
+              (progress.status === "paused"
+                ? `${progress.processed} of ${progress.total} files read`
+                : progress.status === "scanning"
+                  ? "Scanning folders"
+                  : "")}
+          </span>
         </div>
         <b>{percent}%</b>
       </div>

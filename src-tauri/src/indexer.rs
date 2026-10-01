@@ -131,10 +131,14 @@ fn run_full_index(state: &AppState) -> Result<()> {
         .map(|path| path.to_string_lossy().to_string())
         .collect::<Vec<_>>();
 
+    // How far this pass got. A paused pass reported `processed: total`, so the progress card read
+    // "Indexing paused 100%" with most of the library unread.
+    let mut reached = 0u64;
     for (position, path) in files.iter().enumerate() {
         if state.is_paused() || state.is_shutting_down() {
             break;
         }
+        reached = position as u64 + 1;
         let display_name = path
             .file_name()
             .and_then(|name| name.to_str())
@@ -194,7 +198,7 @@ fn run_full_index(state: &AppState) -> Result<()> {
     emit_progress(
         state,
         IndexProgress {
-            processed: total,
+            processed: reached,
             total,
             current_file: None,
             status: if state.is_paused() {
