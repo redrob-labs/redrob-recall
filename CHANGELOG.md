@@ -4,8 +4,17 @@ All notable changes to Redrob Recall are documented here.
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-10-01
+
 ### Added
 
+- Query language ported from bloop: quoted phrases, `-` exclusions, prefix `*`, and a `heading:` field, parsed rather than ORed.
+- Heading index, so a term that appears only in a chunk's heading is findable.
+- Document-name index, a second index rather than duplicated rows, so a document is findable by its own filename.
+- Compatibility matrix with a named authority per row, and a citation gate: a `parity` claim must name a harness that exists.
+- Grammar-reduction harness, which fetches bloop at its pin and checks our grammar against it mechanically.
+- Redrob design system applied to every surface.
+- Branch model enforced in CI.
 - Signed multi-platform GitHub release workflow with Tauri updater artifacts and draft-release QA gates.
 - Explicit update check and signed install flow in Settings.
 - Versioned SQLite migrations, integrity checks, pre-migration/manual backups, and recovery documentation.
@@ -13,6 +22,10 @@ All notable changes to Redrob Recall are documented here.
 
 ### Changed
 
+- Search results quote the matching passage instead of the start of the chunk.
+- bloop is recorded as reimplemented from upstream, not copied: no bloop source ships here. The grammar keeps 7 of its constructs, drops 11, and adds 3 bloop never had -- exclusions, prefix matching and the heading field -- so the relationship is a measured reduction plus our own additions, which is why no row claims parity.
+- The redistributed artefact is named as what it is: qdrant-edge 0.8.0.
+- Tantivy was decided against; FTS5 stays and the query language is ported onto it.
 - Ask failures now classify credentials, balance, rate limits, timeouts, service failures, and malformed responses without exposing upstream bodies.
 - Index records remain pending until semantic vectors commit, enabling interruption recovery.
 - Missing external library roots are preserved, settings are backend-validated, and extraction work is bounded.

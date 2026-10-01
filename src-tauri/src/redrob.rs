@@ -127,17 +127,25 @@ pub async fn ask(state: AppState, request: AskRequest) -> Result<AskResponse, Re
         .map_err(RedrobError::local)?
         .map_err(RedrobError::local)?
         .into_iter()
-        .map(|result| crate::models::ChunkRecord {
-            id: result.chunk_id,
-            document_id: result.document_id,
-            chunk_index: 0,
-            content: result.content,
-            page: result.page,
-            heading: result.heading,
-            path: result.path,
-            name: result.name,
-            extension: result.extension,
-            modified_at: result.modified_at,
+        .map(|result| {
+            // The snippet travels beside the chunk rather than inside ChunkRecord, because that type is
+            // also produced by get_chunks below, where no search ran and there is nothing to centre on.
+            let snippet = result.snippet.clone();
+            (
+                crate::models::ChunkRecord {
+                    id: result.chunk_id,
+                    document_id: result.document_id,
+                    chunk_index: 0,
+                    content: result.content,
+                    page: result.page,
+                    heading: result.heading,
+                    path: result.path,
+                    name: result.name,
+                    extension: result.extension,
+                    modified_at: result.modified_at,
+                },
+                snippet,
+            )
         })
         .collect::<Vec<_>>()
     } else {
@@ -145,6 +153,9 @@ pub async fn ask(state: AppState, request: AskRequest) -> Result<AskResponse, Re
             .storage()
             .get_chunks(&request.source_ids[..request.source_ids.len().min(max_sources)])
             .map_err(RedrobError::local)?
+            .into_iter()
+            .map(|chunk| (chunk, None))
+            .collect::<Vec<_>>()
     };
     if chunks.is_empty() {
         return Err(RedrobError::new(
@@ -157,13 +168,19 @@ pub async fn ask(state: AppState, request: AskRequest) -> Result<AskResponse, Re
     let sources = chunks
         .iter()
         .enumerate()
-        .map(|(index, chunk)| AnswerSource {
+        .map(|(index, (chunk, snippet))| AnswerSource {
             number: index + 1,
             chunk_id: chunk.id,
             path: chunk.path.clone(),
             name: chunk.name.clone(),
             page: chunk.page,
-            excerpt: chunk.content.clone(),
+            // The snippet when the search produced one, the whole chunk otherwise.
+            //
+            // This is the change that matters most in this file. The excerpt was the whole chunk, and
+            // the context budget below truncates from its FIRST character -- so on a 1,117-character
+            // chunk whose match began at character 824, measured, the 120 characters handed to the model
+            // did not contain the searched term at all. It was then asked to answer from them.
+            excerpt: snippet.clone().unwrap_or_else(|| chunk.content.clone()),
         })
         .collect::<Vec<_>>();
     let mut remaining = MAX_CONTEXT_CHARACTERS;

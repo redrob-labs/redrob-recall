@@ -520,7 +520,7 @@ function ResultCard({
           {shortenPath(result.path)}
           {result.page ? ` · Page ${result.page}` : ""}
         </div>
-        <p>{result.content}</p>
+        <p>{result.snippet ?? result.content}</p>
       </div>
     </button>
   );

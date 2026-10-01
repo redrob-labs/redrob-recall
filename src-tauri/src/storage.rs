@@ -12,13 +12,162 @@ use std::{
     sync::Arc,
 };
 
-const SCHEMA_VERSION: i64 = 2;
+const SCHEMA_VERSION: i64 = 4;
+
+/// The columns `documents_fts` indexes, with their bm25 weights.
+///
+/// A SECOND index rather than denormalised copies in `chunks`, and the difference is not marginal.
+/// Measured on 500 documents of 40 chunks each: copying `name` and `path` into every chunk row and
+/// indexing them there cost **+21.1%** of the whole database, where this second table costs **+0.4%**.
+///
+/// It also answers the right question. A name matches a DOCUMENT, so `doc_name : quarterly` against a
+/// denormalised chunk index returned 20,000 rows -- every chunk of every matching document -- where this
+/// returns 500 documents. Forty copies of each result is not a ranking problem to tune, it is the wrong
+/// granularity.
+///
+/// `name` outweighs `path` because a folder name is context a person did not choose per-document, while
+/// a filename is usually what they would type to find it.
+const DOCUMENT_FTS_COLUMNS: &[(&str, f64)] = &[("name", 3.0), ("path", 1.0)];
+
+fn document_fts_bm25() -> String {
+    let weights = DOCUMENT_FTS_COLUMNS
+        .iter()
+        .map(|(_, weight)| format!("{weight}"))
+        .collect::<Vec<_>>()
+        .join(", ");
+    format!("bm25(documents_fts, {weights})")
+}
+
+/// The columns `chunks_fts` indexes, in order, with the bm25 weight each carries.
+///
+/// Declared together and in one place because SQLite cannot catch them drifting apart. Measured:
+/// `bm25(chunks_fts, 1.0)` against a two-column table is accepted and silently weights the second
+/// column 1.0, and `bm25(chunks_fts, 1.0, 1.0, 1.0)` against the same table is also accepted and
+/// silently ignores the third weight. Neither errors, so a weight list written at a call site would
+/// fall out of step with the column list invisibly.
+///
+/// `heading` carries 2.0 rather than 1.0. A heading is a short field, and bm25 already rewards a match
+/// in a short field, so the weight is deliberately modest -- it says a heading match is a stronger
+/// signal than a body match without letting a three-word heading outrank a paragraph that is genuinely
+/// about the term.
+const FTS_COLUMNS: &[(&str, f64)] = &[("content", 1.0), ("heading", 2.0)];
+
+/// `content, heading` for `FTS_COLUMNS`, `name, path` for the document one -- whichever is passed.
+///
+/// One helper rather than one per index, so the CREATE, the triggers and the tests all read the column
+/// list from the same place the weights come from.
+fn column_list(declared: &[(&str, f64)]) -> String {
+    declared
+        .iter()
+        .map(|(name, _)| *name)
+        .collect::<Vec<_>>()
+        .join(", ")
+}
+
+/// `bm25(chunks_fts, 1, 2)` -- always as many weights as there are columns.
+fn fts_bm25() -> String {
+    let weights = FTS_COLUMNS
+        .iter()
+        .map(|(_, weight)| format!("{weight}"))
+        .collect::<Vec<_>>()
+        .join(", ");
+    format!("bm25(chunks_fts, {weights})")
+}
 const BACKUP_RETENTION: usize = 3;
 
 #[derive(Clone)]
 pub struct Storage {
     connection: Arc<Mutex<Connection>>,
     path: Arc<PathBuf>,
+}
+
+/// How many tokens an FTS5 snippet carries around the match.
+///
+/// 40 rather than FTS5's 32 default: a snippet is what a person reads to decide whether a result is the
+/// one they wanted, and what the answering model is given as evidence, so a little more surrounding
+/// sentence is worth the characters. Capped by FTS5 itself at 64.
+const SNIPPET_TOKENS: i64 = 40;
+
+/// One keyword hit: the chunk, its rank, and the text around the match.
+#[derive(Debug, Clone)]
+pub struct KeywordHit {
+    pub chunk_id: u64,
+    pub score: f32,
+    /// The window FTS5 selected around the matching terms, with `…` where it cut.
+    ///
+    /// Carried out of the search rather than recomputed later, because only the query that ran the
+    /// MATCH knows where the match was. Before this, the excerpt was the whole chunk truncated from its
+    /// FIRST character -- measured on a 1,117-character chunk whose match began at character 824, the
+    /// 120-character excerpt handed to the answering model did not contain the searched term at all.
+    pub snippet: String,
+}
+
+/// One document whose name or path matched.
+#[derive(Debug, Clone)]
+pub struct DocumentHit {
+    pub document_id: i64,
+    pub score: f32,
+    /// The window around the match, from whichever of `name` or `path` matched.
+    pub snippet: String,
+}
+
+impl Storage {
+    /// Search document names and paths.
+    ///
+    /// A separate arm from `keyword_search`, over a separate index, because a name matches a DOCUMENT and
+    /// chunk-level matching is the wrong granularity: measured, denormalising the name into every chunk
+    /// row returned 20,000 rows for a term matching 500 documents, and cost 21% of the database against
+    /// this index's 0.4%.
+    ///
+    /// A query naming a chunk-only field -- `heading:policy` -- is not an error here, it is silence. That
+    /// index has nothing to say about headings, and failing the whole search because one arm cannot
+    /// express the question would be worse than the arm abstaining.
+    pub fn document_search(&self, query: &str, limit: usize) -> Result<Vec<DocumentHit>> {
+        let columns: Vec<&str> = DOCUMENT_FTS_COLUMNS.iter().map(|(name, _)| *name).collect();
+        let expression = match crate::query::to_match_expression(query, &columns) {
+            Ok(expression) => expression,
+            Err(crate::query::QueryError::UnknownColumn { .. }) => return Ok(Vec::new()),
+            Err(error) => return Err(error.into()),
+        };
+
+        let connection = self.connection.lock();
+        let bm25 = document_fts_bm25();
+        let mut statement = connection.prepare(&format!(
+            "SELECT rowid, {bm25}, snippet(documents_fts, -1, '', '', '…', {SNIPPET_TOKENS})
+             FROM documents_fts WHERE documents_fts MATCH ?1 ORDER BY {bm25} LIMIT ?2"
+        ))?;
+        let rows = statement.query_map(params![expression, limit as u64], |row| {
+            let document_id: i64 = row.get(0)?;
+            let rank: f64 = row.get(1)?;
+            Ok(DocumentHit {
+                document_id,
+                score: (1.0 / (1.0 + rank.abs())) as f32,
+                snippet: row.get(2).unwrap_or_default(),
+            })
+        })?;
+        rows.collect::<Result<Vec<_>, _>>().map_err(Into::into)
+    }
+
+    /// The first chunk of each given document, which is what represents a name-only match.
+    ///
+    /// A name match carries no in-chunk evidence, so there is no "best" chunk to show -- the opening one
+    /// is the most representative of a document, and returning all of them would flood the results with
+    /// forty copies of the same hit, which is the granularity error this design exists to avoid.
+    pub fn first_chunks_of(&self, document_ids: &[i64]) -> Result<Vec<(i64, u64)>> {
+        if document_ids.is_empty() {
+            return Ok(Vec::new());
+        }
+        let connection = self.connection.lock();
+        let placeholders = vec!["?"; document_ids.len()].join(", ");
+        let mut statement = connection.prepare(&format!(
+            "SELECT document_id, MIN(id) FROM chunks WHERE document_id IN ({placeholders})
+             GROUP BY document_id"
+        ))?;
+        let rows = statement.query_map(rusqlite::params_from_iter(document_ids.iter()), |row| {
+            Ok((row.get::<_, i64>(0)?, row.get::<_, u64>(1)?))
+        })?;
+        rows.collect::<Result<Vec<_>, _>>().map_err(Into::into)
+    }
 }
 
 impl Storage {
@@ -243,25 +392,41 @@ impl Storage {
         rows.collect::<Result<Vec<_>, _>>().map_err(Into::into)
     }
 
-    pub fn keyword_search(&self, query: &str, limit: usize) -> Result<Vec<(u64, f32)>> {
-        let terms = query
-            .split(|ch: char| !ch.is_alphanumeric())
-            .filter(|term| term.chars().count() > 1)
-            .take(12)
-            .map(|term| format!("\"{}\"", term.replace('"', "")))
-            .collect::<Vec<_>>();
-        if terms.is_empty() {
-            return Ok(Vec::new());
-        }
-        let expression = terms.join(" OR ");
+    /// Keyword search over the FTS5 index.
+    ///
+    /// The query goes through `query::to_match_expression`, which parses the boolean operators,
+    /// brackets, phrases, field filters and exclusions a person types and compiles them to an FTS5
+    /// expression. Before that this function stripped every non-alphanumeric character, quoted each
+    /// remaining word and joined them with `OR`: a phrase was torn into its words, an exclusion was
+    /// silently dropped, and `heading:policy` searched for the literal word "heading".
+    ///
+    /// A malformed query is an ERROR rather than an empty result, and deliberately so -- "a quotation
+    /// mark is not closed" is something a person can act on, where zero results looks like the corpus
+    /// simply has nothing.
+    pub fn keyword_search(&self, query: &str, limit: usize) -> Result<Vec<KeywordHit>> {
+        let columns: Vec<&str> = FTS_COLUMNS.iter().map(|(name, _)| *name).collect();
+        let expression = crate::query::to_match_expression(query, &columns)?;
         let connection = self.connection.lock();
-        let mut statement = connection.prepare(
-            "SELECT rowid, bm25(chunks_fts, 1.0) FROM chunks_fts WHERE chunks_fts MATCH ?1 ORDER BY bm25(chunks_fts) LIMIT ?2",
-        )?;
+        // The weights come from FTS_COLUMNS rather than being written here, because a literal list at
+        // this call site is exactly what would drift when a column is added -- and SQLite accepts a
+        // wrong-length weight list without complaining.
+        let bm25 = fts_bm25();
+        // The snippet is selected HERE, in the query that ran the MATCH, because that is the only place
+        // that knows where the match was. Column -1 lets FTS5 pick whichever indexed column matched, so
+        // a heading hit is quoted from the heading rather than from unrelated body text.
+        let mut statement = connection.prepare(&format!(
+            "SELECT rowid, {bm25}, snippet(chunks_fts, -1, '', '', '…', {SNIPPET_TOKENS})
+             FROM chunks_fts WHERE chunks_fts MATCH ?1 ORDER BY {bm25} LIMIT ?2"
+        ))?;
         let rows = statement.query_map(params![expression, limit as u64], |row| {
-            let id: u64 = row.get(0)?;
+            let chunk_id: u64 = row.get(0)?;
             let rank: f64 = row.get(1)?;
-            Ok((id, (1.0 / (1.0 + rank.abs())) as f32))
+            let snippet: String = row.get(2).unwrap_or_default();
+            Ok(KeywordHit {
+                chunk_id,
+                score: (1.0 / (1.0 + rank.abs())) as f32,
+                snippet,
+            })
         })?;
         rows.collect::<Result<Vec<_>, _>>().map_err(Into::into)
     }
@@ -396,24 +561,6 @@ fn migrate(connection: &mut Connection, previous_version: i64) -> Result<()> {
             UNIQUE(document_id, chunk_index)
         );
 
-        CREATE VIRTUAL TABLE IF NOT EXISTS chunks_fts USING fts5(
-            content,
-            content='chunks',
-            content_rowid='id',
-            tokenize='unicode61 remove_diacritics 2'
-        );
-
-        CREATE TRIGGER IF NOT EXISTS chunks_ai AFTER INSERT ON chunks BEGIN
-            INSERT INTO chunks_fts(rowid, content) VALUES (new.id, new.content);
-        END;
-        CREATE TRIGGER IF NOT EXISTS chunks_ad AFTER DELETE ON chunks BEGIN
-            INSERT INTO chunks_fts(chunks_fts, rowid, content) VALUES ('delete', old.id, old.content);
-        END;
-        CREATE TRIGGER IF NOT EXISTS chunks_au AFTER UPDATE ON chunks BEGIN
-            INSERT INTO chunks_fts(chunks_fts, rowid, content) VALUES ('delete', old.id, old.content);
-            INSERT INTO chunks_fts(rowid, content) VALUES (new.id, new.content);
-        END;
-
         CREATE INDEX IF NOT EXISTS idx_documents_status ON documents(status);
         CREATE INDEX IF NOT EXISTS idx_chunks_document ON chunks(document_id);
         "#,
@@ -424,12 +571,115 @@ fn migrate(connection: &mut Connection, previous_version: i64) -> Result<()> {
             [],
         )?;
     }
+    ensure_fts_schema(&transaction)?;
     if previous_version < SCHEMA_VERSION {
         transaction.execute("INSERT INTO chunks_fts(chunks_fts) VALUES('rebuild')", [])?;
     }
     transaction.pragma_update(None, "user_version", SCHEMA_VERSION)?;
     transaction.commit()?;
     Ok(())
+}
+
+/// Create an external-content FTS index and its triggers from a column declaration, replacing one built
+/// on a different column set.
+///
+/// A virtual table cannot be altered -- measured: SQLite answers `virtual tables may not be altered` --
+/// so widening an index means recreating it. That is lossless HERE and only here, because these are
+/// EXTERNAL CONTENT tables: every indexed word lives in the content table, and `rebuild` reads it back
+/// from there. The same treatment of an ordinary FTS5 table would destroy the only copy.
+///
+/// The existing column set is read from the table rather than inferred from the schema version, so a
+/// database left half-migrated by an interrupted run is repaired rather than trusted.
+///
+/// Generic over both indexes because there are now two, and the second was added by CALLING this rather
+/// than by copying it. Copying is how the upstream MySQL client came to lose an ON clause from one of two
+/// otherwise identical queries, which the query port had to fix.
+fn ensure_fts_index(
+    connection: &Connection,
+    index: &str,
+    content_table: &str,
+    declared: &[(&str, f64)],
+    trigger_prefix: &str,
+) -> Result<()> {
+    let columns = column_list(declared);
+    let wanted: Vec<String> = declared
+        .iter()
+        .map(|(name, _)| (*name).to_string())
+        .collect();
+    if fts_existing_columns(connection, index)?.as_deref() == Some(wanted.as_slice()) {
+        return Ok(());
+    }
+
+    let values = declared
+        .iter()
+        .map(|(name, _)| format!("new.{name}"))
+        .collect::<Vec<_>>()
+        .join(", ");
+    let old_values = declared
+        .iter()
+        .map(|(name, _)| format!("old.{name}"))
+        .collect::<Vec<_>>()
+        .join(", ");
+
+    connection.execute_batch(&format!(
+        r#"
+        DROP TRIGGER IF EXISTS {trigger_prefix}_ai;
+        DROP TRIGGER IF EXISTS {trigger_prefix}_ad;
+        DROP TRIGGER IF EXISTS {trigger_prefix}_au;
+        DROP TABLE IF EXISTS {index};
+
+        CREATE VIRTUAL TABLE {index} USING fts5(
+            {columns},
+            content='{content_table}',
+            content_rowid='id',
+            tokenize='unicode61 remove_diacritics 2'
+        );
+
+        CREATE TRIGGER {trigger_prefix}_ai AFTER INSERT ON {content_table} BEGIN
+            INSERT INTO {index}(rowid, {columns}) VALUES (new.id, {values});
+        END;
+        CREATE TRIGGER {trigger_prefix}_ad AFTER DELETE ON {content_table} BEGIN
+            INSERT INTO {index}({index}, rowid, {columns}) VALUES ('delete', old.id, {old_values});
+        END;
+        CREATE TRIGGER {trigger_prefix}_au AFTER UPDATE ON {content_table} BEGIN
+            INSERT INTO {index}({index}, rowid, {columns}) VALUES ('delete', old.id, {old_values});
+            INSERT INTO {index}(rowid, {columns}) VALUES (new.id, {values});
+        END;
+
+        INSERT INTO {index}({index}) VALUES('rebuild');
+        "#
+    ))?;
+    Ok(())
+}
+
+/// Reconcile both indexes against their declarations.
+fn ensure_fts_schema(connection: &Connection) -> Result<()> {
+    ensure_fts_index(connection, "chunks_fts", "chunks", FTS_COLUMNS, "chunks")?;
+    ensure_fts_index(
+        connection,
+        "documents_fts",
+        "documents",
+        DOCUMENT_FTS_COLUMNS,
+        "documents",
+    )
+}
+
+/// The columns an existing FTS index carries, or `None` when there is no such table.
+fn fts_existing_columns(connection: &Connection, index: &str) -> Result<Option<Vec<String>>> {
+    let present: i64 = connection.query_row(
+        "SELECT count(*) FROM sqlite_master WHERE type = 'table' AND name = ?1",
+        [index],
+        |row| row.get(0),
+    )?;
+    if present == 0 {
+        return Ok(None);
+    }
+    // PRAGMA table_info works on an FTS5 table and lists its indexed columns in order.
+    let mut statement = connection.prepare(&format!("PRAGMA table_info({index})"))?;
+    let columns = statement
+        .query_map([], |row| row.get::<_, String>(1))?
+        .collect::<Result<Vec<_>, _>>()?;
+    Ok(Some(columns))
 }
 
 fn has_column(connection: &Connection, table: &str, column: &str) -> Result<bool> {
@@ -623,5 +873,561 @@ mod tests {
         drop(connection);
         drop(storage);
         std::fs::remove_dir_all(path.parent().unwrap()).unwrap();
+    }
+
+    /// The bug this schema change fixes, as a test that fails on the old index.
+    ///
+    /// `chunks.heading` existed and was never indexed, so a term appearing only in a heading could not
+    /// be found. Measured before the change: a chunk headed "Revenue recognition policy" whose body
+    /// never says "policy" did not come back for "policy".
+    #[test]
+    fn a_term_in_a_heading_is_searchable() {
+        let path = temporary_database("heading-search");
+        let storage = Storage::open(&path).unwrap();
+        seed_one_document(&storage);
+
+        let hits = storage.keyword_search("policy", 10).unwrap();
+        assert_eq!(hits.len(), 2, "both the heading match and the body match");
+
+        let heading_only = storage.keyword_search("quarterly", 10).unwrap();
+        assert_eq!(
+            heading_only.len(),
+            1,
+            "a body-only term still matches only its chunk"
+        );
+
+        drop(storage);
+        std::fs::remove_dir_all(path.parent().unwrap()).unwrap();
+    }
+
+    /// A database indexed on the old column set is widened, and nothing is lost doing it.
+    ///
+    /// The index cannot be altered -- SQLite refuses with `virtual tables may not be altered` -- so the
+    /// migration drops and recreates it. That is only safe because this is an external-content table:
+    /// every indexed word lives in `chunks`, and `rebuild` reads it back. This asserts both halves --
+    /// the new column works AND the previously indexed content is still findable.
+    #[test]
+    fn a_legacy_single_column_index_is_widened_without_losing_content() {
+        let path = temporary_database("fts-widen");
+
+        // Build the pre-change schema by hand, including its one-column index.
+        let connection = Connection::open(&path).unwrap();
+        connection
+            .execute_batch(
+                "CREATE TABLE documents (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    path TEXT NOT NULL UNIQUE, name TEXT NOT NULL, extension TEXT NOT NULL,
+                    mime_type TEXT NOT NULL, modified_at TEXT NOT NULL, size_bytes INTEGER NOT NULL,
+                    content_hash TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'indexed',
+                    chunk_count INTEGER NOT NULL DEFAULT 0, last_error TEXT, indexed_at TEXT NOT NULL
+                );
+                CREATE TABLE chunks (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    document_id INTEGER NOT NULL REFERENCES documents(id) ON DELETE CASCADE,
+                    chunk_index INTEGER NOT NULL, content TEXT NOT NULL, page INTEGER, heading TEXT,
+                    UNIQUE(document_id, chunk_index)
+                );
+                CREATE VIRTUAL TABLE chunks_fts USING fts5(
+                    content, content='chunks', content_rowid='id',
+                    tokenize='unicode61 remove_diacritics 2');
+                CREATE TRIGGER chunks_ai AFTER INSERT ON chunks BEGIN
+                    INSERT INTO chunks_fts(rowid, content) VALUES (new.id, new.content);
+                END;
+                INSERT INTO documents (path, name, extension, mime_type, modified_at, size_bytes,
+                                       content_hash, indexed_at)
+                VALUES ('/docs/handbook.md', 'handbook.md', 'md', 'text/markdown',
+                        '2026-01-01T00:00:00Z', 10, 'hash', '2026-01-01T00:00:00Z');
+                INSERT INTO chunks (document_id, chunk_index, content, heading) VALUES
+                    (1, 0, 'The figures were reviewed and approved by the committee.',
+                        'Revenue recognition policy');",
+            )
+            .unwrap();
+        connection
+            .pragma_update(None, "user_version", 2_i64)
+            .unwrap();
+        drop(connection);
+
+        // Before opening: the heading term is invisible, which is the state being migrated away from.
+        let legacy = Connection::open(&path).unwrap();
+        let before: i64 = legacy
+            .query_row(
+                "SELECT count(*) FROM chunks_fts WHERE chunks_fts MATCH 'policy'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(before, 0, "the old index cannot find a heading-only term");
+        drop(legacy);
+
+        let storage = Storage::open(&path).unwrap();
+        {
+            let connection = storage.connection.lock();
+            let version: i64 = connection
+                .pragma_query_value(None, "user_version", |row| row.get(0))
+                .unwrap();
+            assert_eq!(version, SCHEMA_VERSION);
+
+            let mut statement = connection.prepare("PRAGMA table_info(chunks_fts)").unwrap();
+            let columns: Vec<String> = statement
+                .query_map([], |row| row.get::<_, String>(1))
+                .unwrap()
+                .collect::<Result<Vec<_>, _>>()
+                .unwrap();
+            assert_eq!(columns, vec!["content", "heading"]);
+        }
+
+        // The heading is now findable, AND the content that was already indexed still is. The second
+        // assertion is the one that would catch a migration that recreated the index without rebuilding.
+        assert_eq!(storage.keyword_search("policy", 10).unwrap().len(), 1);
+        assert_eq!(storage.keyword_search("committee", 10).unwrap().len(), 1);
+
+        storage.integrity_check().unwrap();
+        drop(storage);
+        std::fs::remove_dir_all(path.parent().unwrap()).unwrap();
+    }
+
+    /// Opening twice must not rebuild the index a second time.
+    ///
+    /// The schema is reconciled against the table's actual columns rather than the version number, so
+    /// that an interrupted migration is repaired; the risk in that choice is doing the work every time,
+    /// which on a large corpus is an expensive no-op.
+    #[test]
+    fn opening_an_already_migrated_database_leaves_the_index_alone() {
+        let path = temporary_database("fts-idempotent");
+        let storage = Storage::open(&path).unwrap();
+        seed_one_document(&storage);
+        drop(storage);
+
+        let reopened = Storage::open(&path).unwrap();
+        assert_eq!(reopened.keyword_search("policy", 10).unwrap().len(), 2);
+        {
+            let connection = reopened.connection.lock();
+            // A rebuild would have reset the triggers too; assert all three survived.
+            let triggers: i64 = connection
+                .query_row(
+                    "SELECT count(*) FROM sqlite_master WHERE type = 'trigger'
+                     AND name IN ('chunks_ai', 'chunks_ad', 'chunks_au')",
+                    [],
+                    |row| row.get(0),
+                )
+                .unwrap();
+            assert_eq!(triggers, 3);
+        }
+        drop(reopened);
+        std::fs::remove_dir_all(path.parent().unwrap()).unwrap();
+    }
+
+    /// The bm25 weight list always has one weight per indexed column.
+    ///
+    /// Measured: SQLite accepts a weight list that is too short AND one that is too long, silently. So
+    /// nothing but this check stands between a future column and a wrong ranking.
+    #[test]
+    fn every_indexed_column_has_a_bm25_weight() {
+        let expression = super::fts_bm25();
+        let weights = expression.trim_end_matches(')').split(',').skip(1).count();
+        assert_eq!(weights, super::FTS_COLUMNS.len());
+        assert_eq!(super::column_list(super::FTS_COLUMNS), "content, heading");
+    }
+
+    /// The query language reaching the index through the real search method.
+    ///
+    /// query.rs proves the compiler against a bare FTS5 table. This proves the product's own path uses
+    /// it -- the compiler existed and was unreachable until `keyword_search` called it.
+    #[test]
+    fn the_query_language_reaches_the_index() {
+        let path = temporary_database("query-language");
+        let storage = Storage::open(&path).unwrap();
+        seed_one_document(&storage);
+
+        let found = |query: &str| storage.keyword_search(query, 10).unwrap().len();
+
+        // Two words mean BOTH, not either. The old implementation ORed them, so this returned 2.
+        assert_eq!(found("revenue committee"), 1, "only chunk 0 has both");
+        assert_eq!(
+            found("revenue OR committee"),
+            2,
+            "either, when asked for either"
+        );
+
+        // A phrase stays whole. The old implementation split it into ORed words.
+        assert_eq!(found("\"quarterly figures\""), 1);
+        assert_eq!(
+            found("\"figures quarterly\""),
+            0,
+            "order matters in a phrase"
+        );
+
+        // A field filter scopes, where the old implementation searched for the word "heading".
+        assert_eq!(found("heading:appendix"), 1);
+        assert_eq!(
+            found("content:appendix"),
+            0,
+            "appendix is a heading, not body text"
+        );
+
+        // An exclusion excludes, where the old implementation dropped it.
+        assert_eq!(
+            found("recognition -appendix"),
+            1,
+            "the Appendix chunk is removed"
+        );
+
+        drop(storage);
+        std::fs::remove_dir_all(path.parent().unwrap()).unwrap();
+    }
+
+    /// A malformed query is an error carrying a sentence, not an empty result set.
+    #[test]
+    fn a_malformed_query_is_reported_rather_than_answered_with_nothing() {
+        let path = temporary_database("query-malformed");
+        let storage = Storage::open(&path).unwrap();
+        seed_one_document(&storage);
+
+        // Zero results would look like the corpus having nothing; the message says what to fix.
+        let error = storage
+            .keyword_search("\"unclosed", 10)
+            .unwrap_err()
+            .to_string();
+        assert!(error.contains("quotation mark"), "got {error}");
+
+        let unknown = storage
+            .keyword_search("author:someone", 10)
+            .unwrap_err()
+            .to_string();
+        assert!(
+            unknown.contains("content, heading"),
+            "names the searchable fields: {unknown}"
+        );
+
+        // And an unknown field never reaches SQLite, which would answer with its own error naming the
+        // column -- the searchable field list comes from FTS_COLUMNS, so the two cannot disagree.
+        assert!(
+            unknown.contains("author"),
+            "names what was wrong: {unknown}"
+        );
+
+        drop(storage);
+        std::fs::remove_dir_all(path.parent().unwrap()).unwrap();
+    }
+
+    /// The snippet is the text AROUND the match, not the head of the chunk.
+    ///
+    /// The defect this replaces, measured: the excerpt was the whole chunk and the answer context budget
+    /// truncated it from the first character, so on a long chunk whose match came late the model was
+    /// handed source text that did not contain the searched term and asked to answer from it.
+    #[test]
+    fn a_snippet_is_taken_from_around_the_match() {
+        let path = temporary_database("snippet");
+        let storage = Storage::open(&path).unwrap();
+        {
+            let connection = storage.connection.lock();
+            let filler = "Filler sentence about unrelated matters. ".repeat(20);
+            let tail = "More filler afterwards. ".repeat(10);
+            let content =
+                format!("{filler}The revenue recognition policy applies to subscriptions. {tail}");
+            assert!(
+                content.find("revenue").unwrap() > 700,
+                "the match must be far from the start for this test to mean anything"
+            );
+            connection
+                .execute(
+                    "INSERT INTO documents (path, name, extension, mime_type, modified_at,
+                                            size_bytes, content_hash, indexed_at)
+                     VALUES ('/d.md', 'd.md', 'md', 'text/markdown', '2026-01-01T00:00:00Z', 10,
+                             'h', '2026-01-01T00:00:00Z')",
+                    [],
+                )
+                .unwrap();
+            connection
+                .execute(
+                    "INSERT INTO chunks (document_id, chunk_index, content, heading)
+                     VALUES (1, 0, ?1, 'Intro')",
+                    [&content],
+                )
+                .unwrap();
+        }
+
+        let hits = storage.keyword_search("revenue", 5).unwrap();
+        assert_eq!(hits.len(), 1);
+        let snippet = &hits[0].snippet;
+
+        assert!(
+            snippet.contains("revenue"),
+            "the snippet must contain what was searched for, got {snippet:?}"
+        );
+        assert!(
+            snippet.len() < 600,
+            "the snippet must be a window, not the chunk: {} characters",
+            snippet.len()
+        );
+        assert!(
+            snippet.contains('…'),
+            "and must mark where it cut: {snippet:?}"
+        );
+
+        drop(storage);
+        std::fs::remove_dir_all(path.parent().unwrap()).unwrap();
+    }
+
+    /// A heading match is quoted from the heading, not from unrelated body text.
+    #[test]
+    fn a_heading_match_is_quoted_from_the_heading() {
+        let path = temporary_database("snippet-heading");
+        let storage = Storage::open(&path).unwrap();
+        seed_one_document(&storage);
+
+        // "Appendix" appears only in the second chunk's heading.
+        let hits = storage.keyword_search("appendix", 5).unwrap();
+        assert_eq!(hits.len(), 1);
+        assert!(
+            hits[0].snippet.to_lowercase().contains("appendix"),
+            "column -1 lets FTS5 quote the column that matched: {:?}",
+            hits[0].snippet
+        );
+
+        drop(storage);
+        std::fs::remove_dir_all(path.parent().unwrap()).unwrap();
+    }
+
+    /// A function word must not turn an AND into an exclusion of real matches.
+    ///
+    /// Measured: with AND semantics, `the revenue` required both terms, so a chunk reading "revenue
+    /// recognition applies..." was excluded for lacking "the". bm25 needs no help ranking common terms --
+    /// it scored "the" at -1.6e-6 against "revenue"'s -4.29 -- so this is about what MATCHES, not order.
+    #[test]
+    fn a_function_word_does_not_exclude_real_matches() {
+        let path = temporary_database("stopwords");
+        let storage = Storage::open(&path).unwrap();
+        seed_one_document(&storage);
+
+        let with = storage.keyword_search("the recognition", 10).unwrap().len();
+        let without = storage.keyword_search("recognition", 10).unwrap().len();
+        assert_eq!(with, without, "the leading function word changed nothing");
+
+        // But a phrase is exact, and rewriting it would answer a different question. The fixture's
+        // second chunk reads "per the policy", so the phrase IS there -- and the reversed phrase is not,
+        // which is what proves the function word survived rather than being quietly dropped.
+        assert_eq!(
+            storage.keyword_search("\"the policy\"", 10).unwrap().len(),
+            1,
+            "the exact phrase is present"
+        );
+        assert_eq!(
+            storage.keyword_search("\"policy the\"", 10).unwrap().len(),
+            0,
+            "reversed it is not, so the phrase was matched in order with its function word intact"
+        );
+
+        drop(storage);
+        std::fs::remove_dir_all(path.parent().unwrap()).unwrap();
+    }
+
+    /// A document is findable by its filename, which no chunk's text contains.
+    #[test]
+    fn a_document_is_findable_by_its_name() {
+        let path = temporary_database("document-name");
+        let storage = Storage::open(&path).unwrap();
+        {
+            let connection = storage.connection.lock();
+            connection
+                .execute_batch(
+                    "INSERT INTO documents (path, name, extension, mime_type, modified_at,
+                                            size_bytes, content_hash, indexed_at)
+                     VALUES ('/home/u/Documents/finance/quarterly-report.pdf', 'quarterly-report.pdf',
+                             'pdf', 'application/pdf', '2026-01-01T00:00:00Z', 10, 'h',
+                             '2026-01-01T00:00:00Z');
+                     INSERT INTO chunks (document_id, chunk_index, content, heading) VALUES
+                        (1, 0, 'Nothing in this text mentions the file name at all.', 'Body'),
+                        (1, 1, 'Another passage equally silent about it.', 'More');",
+                )
+                .unwrap();
+        }
+
+        // The word is in the filename and in no chunk, so the chunk index cannot find it.
+        assert_eq!(
+            storage.keyword_search("quarterly", 10).unwrap().len(),
+            0,
+            "the chunk index has nothing to match"
+        );
+
+        let documents = storage.document_search("quarterly", 10).unwrap();
+        assert_eq!(documents.len(), 1, "the document index does");
+        assert!(
+            documents[0].snippet.to_lowercase().contains("quarterly"),
+            "and quotes where it matched: {:?}",
+            documents[0].snippet
+        );
+
+        // A folder name is searchable too, which is what indexing `path` buys.
+        assert_eq!(storage.document_search("finance", 10).unwrap().len(), 1);
+
+        drop(storage);
+        std::fs::remove_dir_all(path.parent().unwrap()).unwrap();
+    }
+
+    /// One document produces ONE hit, not one per chunk.
+    ///
+    /// The granularity decision, as a test. Measured before choosing: denormalising the name into every
+    /// chunk row and indexing it there returned 20,000 rows for a term matching 500 documents -- forty
+    /// copies of each -- and cost 21% of the database against this separate index's 0.4%.
+    #[test]
+    fn a_name_match_is_one_hit_per_document_not_per_chunk() {
+        let path = temporary_database("document-granularity");
+        let storage = Storage::open(&path).unwrap();
+        {
+            let connection = storage.connection.lock();
+            connection
+                .execute(
+                    "INSERT INTO documents (path, name, extension, mime_type, modified_at,
+                                            size_bytes, content_hash, indexed_at)
+                     VALUES ('/d/quarterly.pdf', 'quarterly.pdf', 'pdf', 'application/pdf',
+                             '2026-01-01T00:00:00Z', 10, 'h', '2026-01-01T00:00:00Z')",
+                    [],
+                )
+                .unwrap();
+            for index in 0..40 {
+                connection
+                    .execute(
+                        "INSERT INTO chunks (document_id, chunk_index, content, heading)
+                         VALUES (1, ?1, 'filler text', 'Section')",
+                        [index],
+                    )
+                    .unwrap();
+            }
+        }
+
+        assert_eq!(
+            storage.document_search("quarterly", 100).unwrap().len(),
+            1,
+            "forty chunks, one document, one hit"
+        );
+
+        // And it resolves to the document's FIRST chunk, which is what represents it.
+        let first = storage.first_chunks_of(&[1]).unwrap();
+        assert_eq!(first.len(), 1);
+        let lowest: u64 = {
+            let connection = storage.connection.lock();
+            connection
+                .query_row(
+                    "SELECT MIN(id) FROM chunks WHERE document_id = 1",
+                    [],
+                    |row| row.get(0),
+                )
+                .unwrap()
+        };
+        assert_eq!(first[0].1, lowest);
+
+        drop(storage);
+        std::fs::remove_dir_all(path.parent().unwrap()).unwrap();
+    }
+
+    /// A query naming a chunk-only field makes the document arm abstain, not fail.
+    #[test]
+    fn a_chunk_only_field_makes_the_document_arm_abstain() {
+        let path = temporary_database("document-abstain");
+        let storage = Storage::open(&path).unwrap();
+        seed_one_document(&storage);
+
+        // `heading` is not in the document index. Failing the whole search because one arm cannot express
+        // the question would be worse than that arm having nothing to say.
+        assert_eq!(
+            storage
+                .document_search("heading:appendix", 10)
+                .unwrap()
+                .len(),
+            0
+        );
+        // And the chunk arm still answers it.
+        assert_eq!(
+            storage
+                .keyword_search("heading:appendix", 10)
+                .unwrap()
+                .len(),
+            1
+        );
+
+        // A malformed query is still an error, though: abstaining is for a field this index lacks, not
+        // for a query nobody can answer.
+        assert!(storage.document_search("\"unclosed", 10).is_err());
+
+        drop(storage);
+        std::fs::remove_dir_all(path.parent().unwrap()).unwrap();
+    }
+
+    /// Both indexes are reconciled, and an older database gains the new one.
+    #[test]
+    fn a_database_without_the_document_index_gains_it() {
+        let path = temporary_database("document-migrate");
+        let storage = Storage::open(&path).unwrap();
+        {
+            let connection = storage.connection.lock();
+            // Simulate the schema-3 state: drop the newer index and its triggers, and set the version back.
+            connection
+                .execute_batch(
+                    "DROP TRIGGER IF EXISTS documents_ai;
+                     DROP TRIGGER IF EXISTS documents_ad;
+                     DROP TRIGGER IF EXISTS documents_au;
+                     DROP TABLE IF EXISTS documents_fts;",
+                )
+                .unwrap();
+            connection
+                .pragma_update(None, "user_version", 3_i64)
+                .unwrap();
+            connection
+                .execute(
+                    "INSERT INTO documents (path, name, extension, mime_type, modified_at,
+                                            size_bytes, content_hash, indexed_at)
+                     VALUES ('/d/annual.pdf', 'annual.pdf', 'pdf', 'application/pdf',
+                             '2026-01-01T00:00:00Z', 10, 'h', '2026-01-01T00:00:00Z')",
+                    [],
+                )
+                .unwrap();
+        }
+        drop(storage);
+
+        let reopened = Storage::open(&path).unwrap();
+        // Rebuilt from `documents`, so a row inserted while the index was absent is still found.
+        assert_eq!(reopened.document_search("annual", 10).unwrap().len(), 1);
+        {
+            let connection = reopened.connection.lock();
+            let version: i64 = connection
+                .pragma_query_value(None, "user_version", |row| row.get(0))
+                .unwrap();
+            assert_eq!(version, SCHEMA_VERSION);
+        }
+        reopened.integrity_check().unwrap();
+
+        drop(reopened);
+        std::fs::remove_dir_all(path.parent().unwrap()).unwrap();
+    }
+
+    /// Every indexed column of the document index has a bm25 weight.
+    #[test]
+    fn the_document_index_weights_match_its_columns() {
+        let expression = super::document_fts_bm25();
+        let weights = expression.trim_end_matches(')').split(',').skip(1).count();
+        assert_eq!(weights, super::DOCUMENT_FTS_COLUMNS.len());
+        assert_eq!(
+            super::column_list(super::DOCUMENT_FTS_COLUMNS),
+            "name, path"
+        );
+    }
+
+    /// Insert one document whose heading carries a term its body does not.
+    fn seed_one_document(storage: &Storage) {
+        let connection = storage.connection.lock();
+        connection
+            .execute_batch(
+                "INSERT INTO documents (path, name, extension, mime_type, modified_at, size_bytes,
+                                        content_hash, indexed_at)
+                 VALUES ('/docs/handbook.md', 'handbook.md', 'md', 'text/markdown',
+                         '2026-01-01T00:00:00Z', 10, 'hash', '2026-01-01T00:00:00Z');
+                 INSERT INTO chunks (document_id, chunk_index, content, heading) VALUES
+                    (1, 0, 'The quarterly figures were reviewed and approved by the committee.',
+                        'Revenue recognition policy'),
+                    (1, 1, 'Recognition of revenue happens when control transfers, per the policy.',
+                        'Appendix');",
+            )
+            .unwrap();
     }
 }

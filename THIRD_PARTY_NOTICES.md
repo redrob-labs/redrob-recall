@@ -2,6 +2,8 @@
 
 Redrob Recall includes open-source software. Each component remains subject to its own license; no Redrob trademark or application license changes those terms.
 
+This file covers components this product **embeds or depends on**. Source code **copied into this repository** from another project is a different obligation with a different lifetime and is recorded in `UPSTREAM_NOTICES.md`, alongside the pinned upstreams in `docs/upstream-sources.toml`.
+
 ## Principal components
 
 | Component               | License           | Project                                  |

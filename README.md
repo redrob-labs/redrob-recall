@@ -155,6 +155,8 @@ Redrob Recall is licensed under the [Apache License 2.0](LICENSE); see [NOTICE](
 ## Project documentation
 
 - [Architecture and trust boundaries](docs/ARCHITECTURE.md)
+- [Compatibility matrix](docs/compatibility.md) — what is implemented, which upstream is the authority for each row, and what is still planned
+- [Upstream source notices](UPSTREAM_NOTICES.md) and the pins in [docs/upstream-sources.toml](docs/upstream-sources.toml)
 - [Signed release process](docs/RELEASING.md)
 - [Backup and recovery](docs/RECOVERY.md)
 - [Release QA checklist](docs/QA_CHECKLIST.md)
