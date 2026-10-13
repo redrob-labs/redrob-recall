@@ -8,6 +8,7 @@ All notable changes to Redrob Recall are documented here.
 
 - Redrob Launcher's shared sign-in is used for Ask when this app has no workspace key of its own. The connection then reads "Signed in with Redrob Launcher"; a key stored by this app still wins, and Disconnect never touches the launcher's file.
 - Release assets are named `redrob-recall-<version>-<os>-<arch>.<ext>` (for example `redrob-recall-0.2.1-linux-x86_64.AppImage`), the shape Redrob Launcher installs, and the release workflow fails unless every asset parses that way. The updater manifest is repointed at the new names; installed clients are unaffected.
+- Every release carries `redrob-launcher.json` (`{ "schema": 1, "sharedAccount": true }`), so Redrob Launcher learns from the release itself that this version uses its shared sign-in. The release workflow fails unless the file is attached and valid.
 
 ### Fixed
 
