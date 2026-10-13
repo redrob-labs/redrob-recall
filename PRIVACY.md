@@ -16,7 +16,7 @@ The app stores the following under `~/.redrob/recall`:
 - up to three consistent metadata backups created manually or before migrations; and
 - a random token used to authenticate the loopback API.
 
-The Redrob workspace API key is stored in the operating system credential manager, not in the metadata database. Original files remain in their existing locations and are not copied into application storage.
+The Redrob workspace API key is stored in the operating system credential manager, not in the metadata database. When no key is stored there, the app reads the one Redrob Launcher shares with every Redrob app on this computer (`account.json` in the launcher's shared directory); it only reads that file, never writes or deletes it, and never logs or displays the key. Original files remain in their existing locations and are not copied into application storage.
 
 ## Network activity
 
@@ -56,7 +56,7 @@ The application does not include an analytics, advertising, crash-reporting, or 
 ## Delete local data
 
 - **Settings → Clear local index** removes searchable metadata, passages, and vectors but does not modify original files, watched-folder settings, or previously created backups.
-- **Disconnect Redrob** removes the stored API key from the operating system credential manager.
+- **Disconnect Redrob** removes the stored API key from the operating system credential manager. It does not remove Redrob Launcher's shared sign-in; sign out in the launcher for that.
 - To remove all app data, quit Redrob Recall and delete `~/.redrob/recall`.
 
 Removing a watched folder stops future indexing of it. Run **Check now** or clear/rebuild the local index to immediately reconcile files that were previously indexed.

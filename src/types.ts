@@ -28,6 +28,8 @@ export interface IndexStats {
 export interface ConnectionStatus {
   connected: boolean;
   keyLabel?: string;
+  /** The key in use is Redrob Launcher's shared sign-in, not a key stored by this app. */
+  viaLauncher: boolean;
   endpoint: string;
   error?: string;
 }

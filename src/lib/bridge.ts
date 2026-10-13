@@ -120,6 +120,7 @@ function mockSnapshot(): AppSnapshot {
     connection: {
       connected: mockConnected,
       keyLabel: mockConnected ? "This device" : undefined,
+      viaLauncher: false,
       endpoint: defaultSettings.redrobBaseUrl,
     },
     dataDirectory: "~/.redrob/recall",
@@ -246,13 +247,18 @@ export const bridge = {
     return {
       connected: true,
       keyLabel: "This device",
+      viaLauncher: false,
       endpoint: defaultSettings.redrobBaseUrl,
     };
   },
   async disconnect(): Promise<ConnectionStatus> {
     if (isDesktop) return invoke("disconnect_redrob");
     mockConnected = false;
-    return { connected: false, endpoint: defaultSettings.redrobBaseUrl };
+    return {
+      connected: false,
+      viaLauncher: false,
+      endpoint: defaultSettings.redrobBaseUrl,
+    };
   },
   async openExternal(url: string): Promise<void> {
     if (isDesktop) return openUrl(url);
