@@ -101,6 +101,8 @@ Tauri는 플랫폼별 번들을 `src-tauri/target/release/bundle/`에 씁니다.
 2. **Ask** 또는 **설정 → Redrob 연결**을 엽니다.
 3. 키를 붙여 넣습니다. 앱은 운영체제 자격 증명 관리자에 저장합니다.
 
+이 컴퓨터가 이미 **Redrob Launcher**로 로그인되어 있으면 키를 붙여 넣을 필요가 없습니다. 앱이 런처의 공유 계정 파일(Linux `~/.config/redrob-shared/account.json`, macOS `~/Library/Application Support/ai.redrob.shared/account.json`, Windows `%APPDATA%\Redrob\Shared\account.json`, 디렉터리는 `REDROB_SHARED_DIR`로 바꿀 수 있음)을 읽고 **Redrob Launcher로 로그인됨**을 표시합니다. 이 앱은 그 파일을 쓰지 않고, 여기에 붙여 넣은 키가 항상 우선하며, 로그아웃은 런처에서 합니다.
+
 로컬 색인과 검색에는 Redrob이 필요하지 않습니다. Ask는 제공한 키에 연결된 워크스페이스와 잔액을 사용합니다. 이 앱은 Redrob Console을 변경하지 않습니다.
 
 ## 프라이버시 동작

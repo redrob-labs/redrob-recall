@@ -2,6 +2,7 @@ use crate::{
     embedding::LocalEmbedder,
     indexer, local_api,
     models::{AppSettings, AppSnapshot, ConnectionStatus, IndexStatus},
+    shared_account,
     storage::Storage,
 };
 use anyhow::{Context, Result};
@@ -27,7 +28,11 @@ struct Inner {
     pub shard: Mutex<Option<EdgeShard>>,
     pub embedder: LocalEmbedder,
     pub settings: RwLock<AppSettings>,
+    /// This app's own key, from the OS keyring. Wins over the shared one.
     pub api_key: RwLock<Option<String>>,
+    /// Redrob Launcher's shared account file, the fallback when this app has no key of its own.
+    /// Read fresh on every use: the person may sign in or out of the launcher while this runs.
+    pub shared_account_path: Option<PathBuf>,
     pub indexing: AtomicBool,
     /// Set when an index was asked for while one was already running, so the running pass runs
     /// once more when it finishes instead of the request being dropped.
@@ -41,11 +46,22 @@ struct Inner {
 #[derive(Clone)]
 pub struct AppState(Arc<Inner>);
 
+/// Which key `AppState` resolved to.
+enum KeyInUse {
+    Own(String),
+    Shared(shared_account::SharedAccount),
+}
+
 impl AppState {
     pub fn initialize(app_handle: AppHandle) -> Result<Self> {
         let base_dirs = BaseDirs::new().context("home directory is unavailable")?;
         let data_dir = base_dirs.home_dir().join(".redrob").join("recall");
-        Self::open(Some(app_handle), data_dir, load_api_key().ok())
+        Self::open(
+            Some(app_handle),
+            data_dir,
+            load_api_key().ok(),
+            shared_account::shared_account_path(),
+        )
     }
 
     /// The real state, rooted somewhere other than the user's library and with nothing to emit to.
@@ -53,13 +69,25 @@ impl AppState {
     /// `~/.redrob/recall` or the OS keyring.
     #[cfg(test)]
     pub(crate) fn open_headless(data_dir: PathBuf) -> Result<Self> {
-        Self::open(None, data_dir, None)
+        Self::open(None, data_dir, None, None)
+    }
+
+    /// `open_headless` with an own key and a shared account file, for the sign-in tests. The own
+    /// key is given directly so the tests never touch the OS keyring.
+    #[cfg(test)]
+    pub(crate) fn open_headless_with_keys(
+        data_dir: PathBuf,
+        own: Option<String>,
+        shared: PathBuf,
+    ) -> Result<Self> {
+        Self::open(None, data_dir, own, Some(shared))
     }
 
     fn open(
         app_handle: Option<AppHandle>,
         data_dir: PathBuf,
         api_key: Option<String>,
+        shared_account_path: Option<PathBuf>,
     ) -> Result<Self> {
         std::fs::create_dir_all(&data_dir)?;
         #[cfg(unix)]
@@ -94,6 +122,7 @@ impl AppState {
             embedder,
             settings: RwLock::new(settings),
             api_key: RwLock::new(api_key),
+            shared_account_path,
             indexing: AtomicBool::new(false),
             rescan_requested: AtomicBool::new(false),
             paused: AtomicBool::new(false),
@@ -171,17 +200,30 @@ impl AppState {
 
     pub fn connection_status(&self) -> ConnectionStatus {
         let settings = self.settings();
+        let key = self.key_in_use();
         ConnectionStatus {
-            connected: self.0.api_key.read().is_some(),
-            key_label: self
-                .0
-                .api_key
-                .read()
-                .as_ref()
-                .map(|_| "This device".to_string()),
+            connected: key.is_some(),
+            key_label: key.as_ref().map(|key| match key {
+                KeyInUse::Own(_) => "This device".to_string(),
+                KeyInUse::Shared(account) => account.api_key_name.clone(),
+            }),
+            via_launcher: matches!(key, Some(KeyInUse::Shared(_))),
             endpoint: settings.redrob_base_url,
             error: None,
         }
+    }
+
+    /// The key this app uses now: its own when it has one, else the computer's shared one from
+    /// Redrob Launcher, read fresh each time. `None` when neither is signed in.
+    fn key_in_use(&self) -> Option<KeyInUse> {
+        if let Some(own) = self.0.api_key.read().clone() {
+            return Some(KeyInUse::Own(own));
+        }
+        self.0
+            .shared_account_path
+            .as_deref()
+            .and_then(shared_account::load)
+            .map(KeyInUse::Shared)
     }
 
     pub fn set_api_key(&self, api_key: String) -> Result<()> {
@@ -198,6 +240,8 @@ impl AppState {
         Ok(())
     }
 
+    /// Forgets this app's own key only. The launcher's shared file is not this app's to delete;
+    /// signing out of it happens in Redrob Launcher.
     pub fn disconnect(&self) {
         *self.0.api_key.write() = None;
         if let Ok(entry) = keyring::Entry::new("ai.redrob.recall", "redrob-api-key") {
@@ -206,8 +250,12 @@ impl AppState {
         self.emit_snapshot();
     }
 
+    /// The bearer token to spend: this app's own key, else Redrob Launcher's shared one.
     pub fn api_key(&self) -> Option<String> {
-        self.0.api_key.read().clone()
+        self.key_in_use().map(|key| match key {
+            KeyInUse::Own(key) => key,
+            KeyInUse::Shared(account) => account.api_key,
+        })
     }
 
     pub fn data_dir(&self) -> &Path {
@@ -369,4 +417,77 @@ fn load_api_key() -> Result<String> {
     entry
         .get_password()
         .context("no Redrob API key in the OS keyring")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::AppState;
+
+    fn scratch(label: &str) -> std::path::PathBuf {
+        let dir =
+            std::env::temp_dir().join(format!("redrob-recall-{label}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    fn shared_file(path: &std::path::Path, key: &str) {
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(
+            path,
+            format!(
+                r#"{{"apiKey":"{key}","apiKeyName":"Redrob Launcher","accountName":"Acme","apiBaseUrl":"https://c/v1"}}"#
+            ),
+        )
+        .unwrap();
+    }
+
+    #[test]
+    fn the_launcher_key_is_the_fallback_and_the_apps_own_key_wins() {
+        let dir = scratch("shared-account");
+        let shared = dir.join("shared").join("account.json");
+
+        // No key anywhere: not connected, and asking has no bearer token.
+        let state =
+            AppState::open_headless_with_keys(dir.join("data-a"), None, shared.clone()).unwrap();
+        let status = state.connection_status();
+        assert!(!status.connected && !status.via_launcher && status.key_label.is_none());
+        assert_eq!(state.api_key(), None);
+
+        // Signed in through Redrob Launcher while the app is open: picked up on the next read,
+        // marked as the launcher's, and the shared key is what gets spent.
+        shared_file(&shared, "rk_shared_0123456789");
+        let status = state.connection_status();
+        assert!(status.connected && status.via_launcher);
+        assert_eq!(status.key_label.as_deref(), Some("Redrob Launcher"));
+        assert_eq!(state.api_key().as_deref(), Some("rk_shared_0123456789"));
+
+        // A broken or emptied file reads as signed out, without an error.
+        std::fs::write(&shared, "{").unwrap();
+        assert!(!state.connection_status().connected);
+        std::fs::write(&shared, r#"{"apiKey":""}"#).unwrap();
+        assert!(!state.connection_status().connected);
+
+        // Signed out in the launcher: nothing left.
+        shared_file(&shared, "rk_shared_0123456789");
+        assert!(state.connection_status().connected);
+        std::fs::remove_file(&shared).unwrap();
+        assert!(!state.connection_status().connected);
+        assert_eq!(state.api_key(), None);
+
+        // This app's own key wins over the launcher's, and is labelled as this device's.
+        shared_file(&shared, "rk_shared_0123456789");
+        let state = AppState::open_headless_with_keys(
+            dir.join("data-b"),
+            Some("rk_own_0123456789".into()),
+            shared.clone(),
+        )
+        .unwrap();
+        let status = state.connection_status();
+        assert!(status.connected && !status.via_launcher);
+        assert_eq!(status.key_label.as_deref(), Some("This device"));
+        assert_eq!(state.api_key().as_deref(), Some("rk_own_0123456789"));
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 }

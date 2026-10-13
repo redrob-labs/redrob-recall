@@ -106,8 +106,14 @@ export default function App() {
       }
     };
     void register();
+    // Redrob Launcher's shared sign-in is read fresh on every snapshot, but nothing on this side
+    // emits when the person signs in or out over there. Coming back to this window is the moment
+    // that most often follows, so re-read then.
+    const onFocus = () => void refresh();
+    window.addEventListener("focus", onFocus);
     return () => {
       cancelled = true;
+      window.removeEventListener("focus", onFocus);
       unlisteners.forEach((unlisten) => unlisten());
     };
   }, [refresh]);
@@ -1263,7 +1269,7 @@ function SettingsView({
           <span className="eyebrow">PREFERENCES</span>
           <h1>Settings</h1>
         </div>
-        {compactLayout && (
+        {compactLayout && !snapshot.connection.viaLauncher && (
           <button
             className="secondary compact-connection-action"
             onClick={() =>
@@ -1303,17 +1309,22 @@ function SettingsView({
             </div>
             <div>
               <strong>
-                {snapshot.connection.connected
-                  ? "Connected to Redrob"
-                  : "Not connected"}
+                {snapshot.connection.viaLauncher
+                  ? "Signed in with Redrob Launcher"
+                  : snapshot.connection.connected
+                    ? "Connected to Redrob"
+                    : "Not connected"}
               </strong>
               <span>
-                {snapshot.connection.connected
-                  ? "The key is verified by Redrob when you send your first question."
-                  : "Local indexing and search work without an account."}
+                {snapshot.connection.viaLauncher
+                  ? "This computer's Redrob sign-in is shared by Redrob Launcher. Sign out there to stop using it here."
+                  : snapshot.connection.connected
+                    ? "The key is verified by Redrob when you send your first question."
+                    : "Local indexing and search work without an account."}
               </span>
             </div>
             {!compactLayout &&
+              !snapshot.connection.viaLauncher &&
               (snapshot.connection.connected ? (
                 <button className="secondary" onClick={() => void disconnect()}>
                   <Icon name="signOut" /> Disconnect

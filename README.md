@@ -101,6 +101,8 @@ The application pins Qdrant Edge 0.8.0. That release uses a standard-library mac
 2. Open **Ask** or **Settings → Redrob connection**.
 3. Paste the key. The app stores it in the operating system credential manager.
 
+If this computer is already signed in through **Redrob Launcher**, no key needs to be pasted: the app reads the launcher's shared account file (`~/.config/redrob-shared/account.json` on Linux, `~/Library/Application Support/ai.redrob.shared/account.json` on macOS, `%APPDATA%\Redrob\Shared\account.json` on Windows; `REDROB_SHARED_DIR` overrides the directory) and shows **Signed in with Redrob Launcher**. The file is never written by this app, a key pasted here always wins over it, and signing out of it happens in the launcher.
+
 Local indexing and Search do not require Redrob. Ask uses the workspace and balance associated with the supplied key. This app does not alter Redrob Console.
 
 ## Privacy behavior

@@ -128,6 +128,9 @@ pub enum IndexStatus {
 pub struct ConnectionStatus {
     pub connected: bool,
     pub key_label: Option<String>,
+    /// The key in use is the computer's shared one from Redrob Launcher, not this app's own:
+    /// signing out happens in the launcher, so the UI shows no Disconnect for it.
+    pub via_launcher: bool,
     pub endpoint: String,
     pub error: Option<String>,
 }
