@@ -4,6 +4,8 @@ All notable changes to Redrob Recall are documented here.
 
 ## [Unreleased]
 
+## [0.2.1] - 2026-10-13
+
 ### Added
 
 - Redrob Launcher's shared sign-in is used for Ask when this app has no workspace key of its own. The connection then reads "Signed in with Redrob Launcher"; a key stored by this app still wins, and Disconnect never touches the launcher's file.
