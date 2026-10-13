@@ -1,7 +1,14 @@
 import { describe, expect, it } from "vitest";
+import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { execFileSync } from "node:child_process";
 import {
+  LAUNCHER_MANIFEST_NAME,
+  checkLauncherManifest,
   checkReleaseAssetNames,
   launcherAssetName,
+  launcherManifestText,
   parseLauncherAssetName,
 } from "./release-asset-names.mjs";
 
@@ -9,6 +16,8 @@ import {
 // the names tauri-action produces for this app and the launcher could read none of them.
 const V020 = [
   "latest.json",
+  // Not on v0.2.0 as published; added here because every release from now on carries it.
+  LAUNCHER_MANIFEST_NAME,
   "Redrob.Recall_0.2.0_aarch64.app.tar.gz",
   "Redrob.Recall_0.2.0_aarch64.app.tar.gz.sig",
   "Redrob.Recall_0.2.0_aarch64.dmg",
@@ -181,7 +190,7 @@ describe("checkReleaseAssetNames", () => {
       "macos-aarch64",
       "windows-x64",
     ]);
-    expect(problems.length).toBe(V020.length - 1 + 3);
+    expect(problems.length).toBe(V020.length - 2 + 3);
   });
 
   it("passes the same release once every asset is renamed", () => {
@@ -207,11 +216,98 @@ describe("checkReleaseAssetNames", () => {
     );
   });
 
+  it("fails a release without redrob-launcher.json", () => {
+    const renamed = renameAll(V020, "0.2.0").filter(
+      (n) => n !== LAUNCHER_MANIFEST_NAME,
+    );
+    const problems = checkReleaseAssetNames(renamed, "0.2.0", ["linux-x86_64"]);
+    expect(problems).toHaveLength(1);
+    expect(problems[0]).toMatch(/^redrob-launcher\.json is not attached/);
+  });
+
   it("reports an asset from another version", () => {
     expect(
-      checkReleaseAssetNames(["redrob-recall-0.2.0-linux-x86_64.deb"], "0.2.1"),
+      checkReleaseAssetNames(
+        [LAUNCHER_MANIFEST_NAME, "redrob-recall-0.2.0-linux-x86_64.deb"],
+        "0.2.1",
+      ),
     ).toEqual([
       "redrob-recall-0.2.0-linux-x86_64.deb: version 0.2.0 is not the release version 0.2.1",
     ]);
+  });
+});
+
+describe("redrob-launcher.json", () => {
+  it("is exactly the contract's schema-1 text, newline-terminated", () => {
+    const text = launcherManifestText();
+    expect(text).toBe('{ "schema": 1, "sharedAccount": true }\n');
+    expect(JSON.parse(text)).toEqual({ schema: 1, sharedAccount: true });
+    expect(checkLauncherManifest(text)).toEqual([]);
+  });
+
+  it("rejects what the launcher would not read as shared sign-in", () => {
+    expect(checkLauncherManifest("not json\n")[0]).toMatch(/not JSON/);
+    expect(checkLauncherManifest("[]\n")).toEqual([
+      "redrob-launcher.json: must be a JSON object",
+    ]);
+    expect(
+      checkLauncherManifest('{ "schema": 2, "sharedAccount": true }\n'),
+    ).toEqual(["redrob-launcher.json: schema must be 1, got 2"]);
+    expect(
+      checkLauncherManifest('{ "schema": 1, "sharedAccount": false }\n'),
+    ).toEqual(["redrob-launcher.json: sharedAccount must be true, got false"]);
+    expect(checkLauncherManifest('{ "schema": 1 }\n')).toEqual([
+      "redrob-launcher.json: sharedAccount must be true, got undefined",
+    ]);
+    expect(
+      checkLauncherManifest('{ "schema": 1, "sharedAccount": true }'),
+    ).toEqual(["redrob-launcher.json: must end with a newline"]);
+  });
+
+  // Rehearsal of the release step: the writer script the workflow runs produces a file the
+  // checker accepts, and the checker fails a release.json that lacks the asset.
+  it("the workflow's writer and checker agree end to end", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "recall-manifest-"));
+    try {
+      const manifest = join(dir, LAUNCHER_MANIFEST_NAME);
+      execFileSync("node", ["scripts/write-launcher-manifest.mjs", manifest]);
+      expect(await readFile(manifest, "utf8")).toBe(launcherManifestText());
+
+      const releaseJson = join(dir, "release.json");
+      const assets = (names) =>
+        JSON.stringify({ assets: names.map((name) => ({ name })) });
+      const { writeFile } = await import("node:fs/promises");
+      await writeFile(releaseJson, assets(renameAll(V020, "0.2.0")));
+      const out = execFileSync(
+        "node",
+        [
+          "scripts/check-release-asset-names.mjs",
+          releaseJson,
+          "v0.2.0",
+          "linux-x86_64",
+        ],
+        {
+          env: { ...process.env, LAUNCHER_MANIFEST_PATH: manifest },
+          encoding: "utf8",
+        },
+      );
+      expect(out).toMatch(/redrob-launcher\.json is attached and valid/);
+
+      await writeFile(
+        releaseJson,
+        assets(
+          renameAll(V020, "0.2.0").filter((n) => n !== LAUNCHER_MANIFEST_NAME),
+        ),
+      );
+      expect(() =>
+        execFileSync(
+          "node",
+          ["scripts/check-release-asset-names.mjs", releaseJson, "v0.2.0"],
+          { stdio: "pipe" },
+        ),
+      ).toThrow(/redrob-launcher\.json is not attached/);
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
   });
 });

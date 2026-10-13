@@ -15,6 +15,54 @@
 
 export const STEM = "redrob-recall";
 
+// The one non-installer asset every release carries besides latest.json: Redrob Launcher reads it
+// from the release's own download URL to learn that this release reads the launcher's shared
+// account file (redrob-launcher docs/release-manifest.md, schema 1). `sharedAccount` is true
+// because develop reads the shared sign-in since #49. Unknown fields are ignored by the launcher,
+// so this object may grow; the schema number does not change for additions.
+export const LAUNCHER_MANIFEST_NAME = "redrob-launcher.json";
+// The exact bytes the contract shows, so `diff` against the launcher docs is a byte match.
+const LAUNCHER_MANIFEST_TEXT = '{ "schema": 1, "sharedAccount": true }\n';
+export const LAUNCHER_MANIFEST = JSON.parse(LAUNCHER_MANIFEST_TEXT);
+
+/** The bytes the release workflow uploads as `redrob-launcher.json` (newline-terminated). */
+export function launcherManifestText() {
+  return LAUNCHER_MANIFEST_TEXT;
+}
+
+/**
+ * Problems with the text of a `redrob-launcher.json`, empty when the launcher would read it as
+ * "this release uses the shared sign-in".
+ *
+ * @param {string} text
+ */
+export function checkLauncherManifest(text) {
+  let parsed;
+  try {
+    parsed = JSON.parse(text);
+  } catch (error) {
+    return [`${LAUNCHER_MANIFEST_NAME}: not JSON (${error.message})`];
+  }
+  const problems = [];
+  if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) {
+    return [`${LAUNCHER_MANIFEST_NAME}: must be a JSON object`];
+  }
+  if (parsed.schema !== 1) {
+    problems.push(
+      `${LAUNCHER_MANIFEST_NAME}: schema must be 1, got ${JSON.stringify(parsed.schema)}`,
+    );
+  }
+  if (parsed.sharedAccount !== true) {
+    problems.push(
+      `${LAUNCHER_MANIFEST_NAME}: sharedAccount must be true, got ${JSON.stringify(parsed.sharedAccount)}`,
+    );
+  }
+  if (!text.endsWith("\n")) {
+    problems.push(`${LAUNCHER_MANIFEST_NAME}: must end with a newline`);
+  }
+  return problems;
+}
+
 // Rust target triple -> { token the launcher expects, arch tokens Tauri puts in the file name }.
 // Tauri's arch token differs per bundle: `amd64`/`arm64` on .deb, `x86_64`/`aarch64` on .rpm and
 // .AppImage, `x64`/`arm64` on Windows, `aarch64`/`x64`/`universal` on macOS.
@@ -131,7 +179,9 @@ export function parseLauncherAssetName(assetName) {
 
 /**
  * Every asset on the release must carry a launcher-readable name for this version, except the
- * updater manifest. Returns the list of problems; empty means the release is installable.
+ * updater manifest and `redrob-launcher.json`, and the latter must be present: without it the
+ * launcher falls back to its built-in table and cannot know this release reads the shared sign-in.
+ * Returns the list of problems; empty means the release is installable.
  *
  * @param {string[]} assetNames
  * @param {string} version
@@ -145,8 +195,13 @@ export function checkReleaseAssetNames(
 ) {
   const problems = [];
   const installableTokens = new Set();
+  if (!assetNames.includes(LAUNCHER_MANIFEST_NAME)) {
+    problems.push(
+      `${LAUNCHER_MANIFEST_NAME} is not attached; Redrob Launcher cannot see that this release uses the shared sign-in`,
+    );
+  }
   for (const name of assetNames) {
-    if (name === "latest.json") continue;
+    if (name === "latest.json" || name === LAUNCHER_MANIFEST_NAME) continue;
     const parsed = parseLauncherAssetName(name);
     if (!parsed) {
       problems.push(

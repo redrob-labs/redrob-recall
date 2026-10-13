@@ -480,13 +480,42 @@ jobs:
           gh api -X DELETE "repos/${GITHUB_REPOSITORY}/releases/assets/${manifest_id}"
           gh release upload "${RELEASE_TAG}" latest.json --repo "${GITHUB_REPOSITORY}"
 
-      # Every file on the release must be one Redrob Launcher can parse, and every built leg must
-      # have left an installable one. A bundler or action upgrade that changes the file names
-      # fails here instead of shipping a release the launcher silently skips.
+      # Redrob Launcher reads this one small file from every release to learn that the release uses
+      # its shared sign-in (launcher docs/release-manifest.md). Without it the launcher falls back to
+      # its built-in table and users see "Next release uses this sign-in" forever. Written from the
+      # same module the checker below reads, uploaded while the release is still a draft, then
+      # downloaded back so the check runs against the bytes GitHub actually serves. This repo has no
+      # SHA256SUMS.txt (the updater signs each asset instead), so there is no sums file to list it in.
+      - name: Upload the Redrob Launcher release manifest
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_TAG: ${{ github.ref_name }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          node scripts/write-launcher-manifest.mjs redrob-launcher.json
+          gh release upload "${RELEASE_TAG}" redrob-launcher.json --clobber --repo "${GITHUB_REPOSITORY}"
+          # Re-read the draft so release.json, which the next step checks, lists the new asset.
+          gh api "repos/${GITHUB_REPOSITORY}/releases?per_page=100" > "$RUNNER_TEMP/releases.json"
+          jq --arg tag "${RELEASE_TAG}" 'map(select(.tag_name == $tag)) | first' "$RUNNER_TEMP/releases.json" > release.json
+          manifest_id="$(jq -r '.assets[] | select(.name == "redrob-launcher.json") | .id' release.json)"
+          if [ -z "$manifest_id" ] || [ "$manifest_id" = "null" ]; then
+            echo "::error::redrob-launcher.json did not attach to ${RELEASE_TAG}"
+            exit 1
+          fi
+          gh api -H "Accept: application/octet-stream" \
+            "repos/${GITHUB_REPOSITORY}/releases/assets/${manifest_id}" > "$RUNNER_TEMP/redrob-launcher.json"
+          cmp redrob-launcher.json "$RUNNER_TEMP/redrob-launcher.json"
+
+      # Every file on the release must be one Redrob Launcher can parse, every built leg must
+      # have left an installable one, and redrob-launcher.json must be attached and valid. A
+      # bundler or action upgrade that changes the file names fails here instead of shipping a
+      # release the launcher silently skips.
       - name: Assert every asset carries a name Redrob Launcher can install
         env:
           RELEASE_TAG: ${{ github.ref_name }}
           LAUNCHER_TOKENS: ${{ needs.validate.outputs.launcher_tokens }}
+          LAUNCHER_MANIFEST_PATH: ${{ runner.temp }}/redrob-launcher.json
         shell: bash
         run: node scripts/check-release-asset-names.mjs release.json "${RELEASE_TAG}" ${LAUNCHER_TOKENS}
 
