@@ -26,6 +26,7 @@ jobs:
       matrix: ${{ steps.release-matrix.outputs.matrix }}
       platforms: ${{ steps.release-matrix.outputs.platforms }}
       asset_suffixes: ${{ steps.release-matrix.outputs.asset_suffixes }}
+      launcher_tokens: ${{ steps.release-matrix.outputs.launcher_tokens }}
       windows_signing_ready: ${{ steps.release-matrix.outputs.windows_signing_ready }}
     steps:
       - name: Check out source
@@ -407,6 +408,18 @@ jobs:
             Write-Host "$($installer.Name) signed by $($signature.SignerCertificate.Subject) status=$($signature.Status)"
           }
 
+      # Tauri names its files `Redrob Recall_<ver>_<arch>.<ext>`; Redrob Launcher installs only
+      # `redrob-recall-<ver>-<os>-<arch>.<ext>` (see scripts/release-asset-names.mjs). Renaming is a
+      # PATCH on each asset -- same bytes, same id -- so the updater signatures stay valid, and
+      # latest.json is repointed at the new names in the same step. Runs after the AppImage repack,
+      # which must see the bundler's own name.
+      - name: Rename the uploaded assets for Redrob Launcher
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_TARGET: ${{ matrix.target }}
+        run: node scripts/rename-release-assets.mjs "${GITHUB_REPOSITORY}" "${GITHUB_REF_NAME}" "${RELEASE_TARGET}"
+
   # The CDN promotion job that used to live here is gone: GitHub Releases is now the
   # update channel itself, so there is nothing to copy anywhere. What that job also
   # did, though, was VERIFY the published channel -- so its checks are re-pointed
@@ -466,6 +479,16 @@ jobs:
           # before the corrected manifest can take its name.
           gh api -X DELETE "repos/${GITHUB_REPOSITORY}/releases/assets/${manifest_id}"
           gh release upload "${RELEASE_TAG}" latest.json --repo "${GITHUB_REPOSITORY}"
+
+      # Every file on the release must be one Redrob Launcher can parse, and every built leg must
+      # have left an installable one. A bundler or action upgrade that changes the file names
+      # fails here instead of shipping a release the launcher silently skips.
+      - name: Assert every asset carries a name Redrob Launcher can install
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+          LAUNCHER_TOKENS: ${{ needs.validate.outputs.launcher_tokens }}
+        shell: bash
+        run: node scripts/check-release-asset-names.mjs release.json "${RELEASE_TAG}" ${LAUNCHER_TOKENS}
 
       - name: Assert the draft release carries a usable updater manifest
         env:
