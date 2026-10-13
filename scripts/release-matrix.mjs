@@ -20,6 +20,7 @@
 // add the leg back here and darwin-x86_64 flows through to the updater contract automatically.
 
 import { appendFileSync } from 'node:fs';
+import { TARGET_TOKENS } from './release-asset-names.mjs';
 
 const legs = [
   {
@@ -85,6 +86,16 @@ const matrix = included.map(({ label, platform, target, bundles }) => ({
   bundles,
 }));
 const platforms = included.flatMap((leg) => leg.updaterPlatforms);
+// The os-arch token Redrob Launcher expects in each built leg's asset names; the verify job
+// requires an installable asset for every one of them.
+const launcherTokens = included.map((leg) => {
+  const entry = TARGET_TOKENS[leg.target];
+  if (!entry) {
+    console.error(`No Redrob Launcher token for target ${leg.target}; add it to release-asset-names.mjs`);
+    process.exit(1);
+  }
+  return entry.token;
+});
 const assetSuffixes = [
   ...new Set(
     included.flatMap((leg) =>
@@ -103,11 +114,13 @@ const assetSuffixes = [
 console.log(`Building: ${included.map((leg) => leg.label).join(', ')}`);
 console.log(`Updater platforms required on the draft: ${platforms.join(' ')}`);
 console.log(`Asset suffixes required on the draft: ${assetSuffixes.join(' ')}`);
+console.log(`Redrob Launcher tokens required on the draft: ${launcherTokens.join(' ')}`);
 
 const output = process.env.GITHUB_OUTPUT;
 if (output) {
   appendFileSync(output, `matrix=${JSON.stringify(matrix)}\n`);
   appendFileSync(output, `platforms=${platforms.join(' ')}\n`);
   appendFileSync(output, `asset_suffixes=${assetSuffixes.join(' ')}\n`);
+  appendFileSync(output, `launcher_tokens=${launcherTokens.join(' ')}\n`);
   appendFileSync(output, `windows_signing_ready=${windowsSigningReady}\n`);
 }

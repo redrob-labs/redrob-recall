@@ -74,6 +74,20 @@ Tauri requires signed updater artifacts and describes the key model in its
 notarization setup is covered by the
 [Tauri macOS signing guide](https://v2.tauri.app/distribute/sign/macos/).
 
+## Asset names
+
+Redrob Launcher installs a release asset only when its name is
+`redrob-recall-<version>-<os>-<arch>.<ext>` — for example
+`redrob-recall-0.2.1-linux-x86_64.AppImage`, `redrob-recall-0.2.1-macos-aarch64.dmg`,
+`redrob-recall-0.2.1-windows-x64.msi`. Tauri's bundler writes `Redrob Recall_0.2.1_amd64.AppImage`,
+which the launcher cannot parse, so each build leg renames what it uploaded
+(`scripts/rename-release-assets.mjs`, a PATCH on the asset: same bytes, same id, so updater
+signatures stay valid) and repoints `latest.json` at the new names. The updater is not affected:
+clients follow the URLs in `latest.json`, never a file name. The `verify-release-assets` job then
+fails the run unless every asset parses and every built leg left an installable one
+(`scripts/check-release-asset-names.mjs`); the naming rules themselves live in
+`scripts/release-asset-names.mjs` and are unit-tested.
+
 ## Cut a release
 
 1. Update `CHANGELOG.md`.
