@@ -1,23 +1,25 @@
 import { describe, expect, it } from "vitest";
-import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { execFileSync } from "node:child_process";
 import {
-  LAUNCHER_MANIFEST_NAME,
-  checkLauncherManifest,
+  NON_INSTALLER_ASSETS,
   checkReleaseAssetNames,
   launcherAssetName,
-  launcherManifestText,
   parseLauncherAssetName,
 } from "./release-asset-names.mjs";
+import {
+  checkUpdaterManifest,
+  mergeUpdaterFragments,
+  publishedDownloadUrl,
+  updaterEntries,
+} from "./updater-manifest.mjs";
 
 // The asset list of the published v0.2.0 release, verbatim (`gh release view v0.2.0`). These are
-// the names tauri-action produces for this app and the launcher could read none of them.
+// the names tauri-action produced for this app and the launcher could read none of them.
 const V020 = [
   "latest.json",
-  // Not on v0.2.0 as published; added here because every release from now on carries it.
-  LAUNCHER_MANIFEST_NAME,
   "Redrob.Recall_0.2.0_aarch64.app.tar.gz",
   "Redrob.Recall_0.2.0_aarch64.app.tar.gz.sig",
   "Redrob.Recall_0.2.0_aarch64.dmg",
@@ -34,6 +36,7 @@ const V020 = [
 const LINUX = "x86_64-unknown-linux-gnu";
 const MAC = "aarch64-apple-darwin";
 const WINDOWS = "x86_64-pc-windows-msvc";
+const REPO = "redrob-labs/redrob-recall";
 
 function renameAll(names, version) {
   return names.map((name) => {
@@ -80,6 +83,24 @@ describe("launcherAssetName", () => {
     expect(
       launcherAssetName("Redrob Recall_0.2.1_amd64.AppImage", "0.2.1", LINUX),
     ).toBe("redrob-recall-0.2.1-linux-x86_64.AppImage");
+  });
+
+  // bundle/macos/ holds `Redrob Recall.app.tar.gz` with no version or arch: the updater payload
+  // as the bundler writes it, which tauri-action used to rename on upload and the staging step
+  // names now.
+  it("names the bare macOS updater payload after the leg's arch", () => {
+    expect(launcherAssetName("Redrob Recall.app.tar.gz", "0.3.0", MAC)).toBe(
+      "redrob-recall-0.3.0-macos-aarch64.app.tar.gz",
+    );
+    expect(
+      launcherAssetName("Redrob Recall.app.tar.gz.sig", "0.3.0", MAC),
+    ).toBe("redrob-recall-0.3.0-macos-aarch64.app.tar.gz.sig");
+    expect(
+      launcherAssetName("Redrob Recall.app.tar.gz", "0.3.0", LINUX),
+    ).toBeNull();
+    expect(
+      launcherAssetName("Redrob Recall.app.tar.gz", "0.3.0", WINDOWS),
+    ).toBeNull();
   });
 
   it("leaves another leg's assets, renamed assets and the manifest alone", () => {
@@ -190,7 +211,9 @@ describe("checkReleaseAssetNames", () => {
       "macos-aarch64",
       "windows-x64",
     ]);
-    expect(problems.length).toBe(V020.length - 2 + 3);
+    // Every Tauri-named file is a problem (latest.json is not), plus one per leg with no
+    // installable asset.
+    expect(problems.length).toBe(V020.length - 1 + 3);
   });
 
   it("passes the same release once every asset is renamed", () => {
@@ -209,6 +232,17 @@ describe("checkReleaseAssetNames", () => {
     ).toEqual([]);
   });
 
+  // The shared redrob-labs publish job adds these two beside the installers; neither is one.
+  it("ignores the files the shared publish job adds", () => {
+    expect([...NON_INSTALLER_ASSETS]).toEqual(
+      expect.arrayContaining(["redrob-launcher.json", "SHA256SUMS.txt"]),
+    );
+    const renamed = [...renameAll(V020, "0.2.0"), ...NON_INSTALLER_ASSETS];
+    expect(checkReleaseAssetNames(renamed, "0.2.0", ["linux-x86_64"])).toEqual(
+      [],
+    );
+  });
+
   it("reports a built leg that left no installable asset", () => {
     const renamed = renameAll(V020, "0.2.0").filter((n) => !n.endsWith(".dmg"));
     expect(checkReleaseAssetNames(renamed, "0.2.0", ["macos-aarch64"])).toEqual(
@@ -216,96 +250,264 @@ describe("checkReleaseAssetNames", () => {
     );
   });
 
-  it("fails a release without redrob-launcher.json", () => {
-    const renamed = renameAll(V020, "0.2.0").filter(
-      (n) => n !== LAUNCHER_MANIFEST_NAME,
-    );
-    const problems = checkReleaseAssetNames(renamed, "0.2.0", ["linux-x86_64"]);
-    expect(problems).toHaveLength(1);
-    expect(problems[0]).toMatch(/^redrob-launcher\.json is not attached/);
-  });
-
   it("reports an asset from another version", () => {
     expect(
-      checkReleaseAssetNames(
-        [LAUNCHER_MANIFEST_NAME, "redrob-recall-0.2.0-linux-x86_64.deb"],
-        "0.2.1",
-      ),
+      checkReleaseAssetNames(["redrob-recall-0.2.0-linux-x86_64.deb"], "0.2.1"),
     ).toEqual([
       "redrob-recall-0.2.0-linux-x86_64.deb: version 0.2.0 is not the release version 0.2.1",
     ]);
   });
 });
 
-describe("redrob-launcher.json", () => {
-  it("is exactly the contract's schema-1 text, newline-terminated", () => {
-    const text = launcherManifestText();
-    expect(text).toBe('{ "schema": 1, "sharedAccount": true }\n');
-    expect(JSON.parse(text)).toEqual({ schema: 1, sharedAccount: true });
-    expect(checkLauncherManifest(text)).toEqual([]);
+describe("updaterEntries", () => {
+  const staged = renameAll(V020, "0.2.0").filter((n) => n !== "latest.json");
+
+  it("writes the bare key for the OS's payload and a suffixed key per signed bundle", () => {
+    const keys = (target) =>
+      updaterEntries(staged, target).map((e) => [e.key, e.asset]);
+    expect(keys(LINUX)).toEqual([
+      ["linux-x86_64", "redrob-recall-0.2.0-linux-x86_64.AppImage"],
+      ["linux-x86_64-appimage", "redrob-recall-0.2.0-linux-x86_64.AppImage"],
+      ["linux-x86_64-deb", "redrob-recall-0.2.0-linux-x86_64.deb"],
+    ]);
+    expect(keys(MAC)).toEqual([
+      ["darwin-aarch64", "redrob-recall-0.2.0-macos-aarch64.app.tar.gz"],
+      ["darwin-aarch64-app", "redrob-recall-0.2.0-macos-aarch64.app.tar.gz"],
+    ]);
+    // NSIS is the payload under the bare key (per-user install); the MSI keeps its own key.
+    expect(keys(WINDOWS)).toEqual([
+      ["windows-x86_64", "redrob-recall-0.2.0-windows-x64-setup.exe"],
+      ["windows-x86_64-nsis", "redrob-recall-0.2.0-windows-x64-setup.exe"],
+      ["windows-x86_64-msi", "redrob-recall-0.2.0-windows-x64.msi"],
+    ]);
+    for (const entry of updaterEntries(staged, LINUX)) {
+      expect(entry.sig).toBe(`${entry.asset}.sig`);
+    }
   });
 
-  it("rejects what the launcher would not read as shared sign-in", () => {
-    expect(checkLauncherManifest("not json\n")[0]).toMatch(/not JSON/);
-    expect(checkLauncherManifest("[]\n")).toEqual([
-      "redrob-launcher.json: must be a JSON object",
+  it("skips a payload without a signature beside it, and fails when the OS payload has none", () => {
+    const noDebSig = staged.filter(
+      (n) => n !== "redrob-recall-0.2.0-linux-x86_64.deb.sig",
+    );
+    expect(updaterEntries(noDebSig, LINUX).map((e) => e.key)).toEqual([
+      "linux-x86_64",
+      "linux-x86_64-appimage",
     ]);
-    expect(
-      checkLauncherManifest('{ "schema": 2, "sharedAccount": true }\n'),
-    ).toEqual(["redrob-launcher.json: schema must be 1, got 2"]);
-    expect(
-      checkLauncherManifest('{ "schema": 1, "sharedAccount": false }\n'),
-    ).toEqual(["redrob-launcher.json: sharedAccount must be true, got false"]);
-    expect(checkLauncherManifest('{ "schema": 1 }\n')).toEqual([
-      "redrob-launcher.json: sharedAccount must be true, got undefined",
+    const noAppImageSig = staged.filter(
+      (n) => n !== "redrob-recall-0.2.0-linux-x86_64.AppImage.sig",
+    );
+    expect(() => updaterEntries(noAppImageSig, LINUX)).toThrow(
+      /no signed updater payload for linux-x86_64/,
+    );
+  });
+});
+
+describe("latest.json", () => {
+  const tag = "v0.2.0";
+  const url = (name) => publishedDownloadUrl(REPO, tag, name);
+  const fragment = (target) => ({
+    platforms: Object.fromEntries(
+      updaterEntries(renameAll(V020, "0.2.0"), target).map((e) => [
+        e.key,
+        { signature: `sig-of-${e.asset}`, url: url(e.asset) },
+      ]),
+    ),
+  });
+  const release = {
+    version: "0.2.0",
+    repository: REPO,
+    tag,
+    requiredPlatforms: ["linux-x86_64", "darwin-aarch64", "windows-x86_64"],
+    assetNames: renameAll(V020, "0.2.0").filter((n) => n !== "latest.json"),
+  };
+
+  it("merges the legs' fragments into one manifest and refuses a key written twice", () => {
+    const manifest = mergeUpdaterFragments(
+      [fragment(LINUX), fragment(MAC), fragment(WINDOWS)],
+      { version: "0.2.0", notes: "n", pubDate: "2026-10-14T00:00:00.000Z" },
+    );
+    expect(Object.keys(manifest.platforms).sort()).toEqual([
+      "darwin-aarch64",
+      "darwin-aarch64-app",
+      "linux-x86_64",
+      "linux-x86_64-appimage",
+      "linux-x86_64-deb",
+      "windows-x86_64",
+      "windows-x86_64-msi",
+      "windows-x86_64-nsis",
     ]);
-    expect(
-      checkLauncherManifest('{ "schema": 1, "sharedAccount": true }'),
-    ).toEqual(["redrob-launcher.json: must end with a newline"]);
+    expect(manifest.platforms["windows-x86_64"].url).toBe(
+      "https://github.com/redrob-labs/redrob-recall/releases/download/v0.2.0/redrob-recall-0.2.0-windows-x64-setup.exe",
+    );
+    expect(checkUpdaterManifest(manifest, release)).toEqual([]);
+    expect(() =>
+      mergeUpdaterFragments([fragment(LINUX), fragment(LINUX)], {
+        version: "0.2.0",
+        notes: "n",
+        pubDate: "2026-10-14T00:00:00.000Z",
+      }),
+    ).toThrow(/linux-x86_64 is written by two build legs/);
   });
 
-  // Rehearsal of the release step: the writer script the workflow runs produces a file the
-  // checker accepts, and the checker fails a release.json that lacks the asset.
-  it("the workflow's writer and checker agree end to end", async () => {
-    const dir = await mkdtemp(join(tmpdir(), "recall-manifest-"));
+  it("names every way a manifest can silently freeze clients", () => {
+    const good = mergeUpdaterFragments([fragment(LINUX), fragment(MAC)], {
+      version: "0.2.0",
+      notes: "n",
+      pubDate: "2026-10-14T00:00:00.000Z",
+    });
+    // A built platform with no entry.
+    expect(checkUpdaterManifest(good, release)).toEqual([
+      "no entry for built platform windows-x86_64",
+    ]);
+    // Wrong version, a URL off this repository, a URL to a file not in the set, no signature.
+    const bad = structuredClone(good);
+    bad.version = "0.1.9";
+    bad.platforms["linux-x86_64"].url =
+      "https://cdn.example.com/redrob-recall-0.2.0-linux-x86_64.AppImage";
+    bad.platforms["linux-x86_64-deb"].url = url(
+      "redrob-recall-0.2.0-linux-x86_64.rpm",
+    );
+    bad.platforms["darwin-aarch64"].signature = "";
+    const problems = checkUpdaterManifest(bad, {
+      ...release,
+      requiredPlatforms: [],
+    });
+    expect(problems).toEqual([
+      expect.stringMatching(
+        /^version "0\.1\.9" is not the release version 0\.2\.0/,
+      ),
+      expect.stringMatching(
+        /^linux-x86_64: url is not a release asset of redrob-labs\/redrob-recall at v0\.2\.0/,
+      ),
+      expect.stringMatching(
+        /^linux-x86_64-deb: names redrob-recall-0\.2\.0-linux-x86_64\.rpm, which is not among/,
+      ),
+      "darwin-aarch64: has no signature",
+    ]);
+  });
+
+  // Rehearsal of the release legs and the updater-manifest job on real bytes: Tauri's own signer
+  // (a throwaway key) signs fake bundles laid out as the bundler writes them, the staging script
+  // names them and writes the fragment, and the assembly script verifies every signature against
+  // the staged bytes and writes latest.json. A tampered file after signing must fail it.
+  it("stage-release-assets and assemble-updater-manifest agree end to end", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "recall-release-"));
     try {
-      const manifest = join(dir, LAUNCHER_MANIFEST_NAME);
-      execFileSync("node", ["scripts/write-launcher-manifest.mjs", manifest]);
-      expect(await readFile(manifest, "utf8")).toBe(launcherManifestText());
+      const tauri = join("node_modules", ".bin", "tauri");
+      execFileSync(
+        tauri,
+        ["signer", "generate", "-w", join(dir, "key"), "--ci"],
+        { stdio: "pipe" },
+      );
+      const signEnv = {
+        ...process.env,
+        TAURI_SIGNING_PRIVATE_KEY: await readFile(join(dir, "key"), "utf8"),
+        TAURI_SIGNING_PRIVATE_KEY_PASSWORD: "",
+      };
+      const publicKey = (await readFile(join(dir, "key.pub"), "utf8")).trim();
+      const bundle = join(dir, "bundle");
+      const write = async (sub, name, signed) => {
+        await mkdir(join(bundle, sub), { recursive: true });
+        const path = join(bundle, sub, name);
+        await writeFile(path, `bytes of ${name}\n`);
+        if (signed)
+          execFileSync(tauri, ["signer", "sign", path], {
+            env: signEnv,
+            stdio: "pipe",
+          });
+      };
+      await write("appimage", "Redrob Recall_0.2.0_amd64.AppImage", true);
+      await write("deb", "Redrob Recall_0.2.0_amd64.deb", true);
+      // The unpacked AppDir sits beside the AppImage and is not an asset.
+      await mkdir(join(bundle, "appimage", "Redrob Recall.AppDir"), {
+        recursive: true,
+      });
 
-      const releaseJson = join(dir, "release.json");
-      const assets = (names) =>
-        JSON.stringify({ assets: names.map((name) => ({ name })) });
-      const { writeFile } = await import("node:fs/promises");
-      await writeFile(releaseJson, assets(renameAll(V020, "0.2.0")));
-      const out = execFileSync(
+      const assets = join(dir, "assets");
+      const fragments = join(dir, "fragments");
+      const env = { ...process.env, GITHUB_REPOSITORY: REPO };
+      const staged = execFileSync(
         "node",
         [
-          "scripts/check-release-asset-names.mjs",
-          releaseJson,
-          "v0.2.0",
-          "linux-x86_64",
+          "scripts/stage-release-assets.mjs",
+          bundle,
+          "0.2.0",
+          LINUX,
+          assets,
+          join(fragments, `${LINUX}.json`),
         ],
-        {
-          env: { ...process.env, LAUNCHER_MANIFEST_PATH: manifest },
-          encoding: "utf8",
-        },
+        { env, encoding: "utf8" },
       );
-      expect(out).toMatch(/redrob-launcher\.json is attached and valid/);
+      expect(staged).toMatch(/staged 4 file\(s\)/);
+      const fragment = JSON.parse(
+        await readFile(join(fragments, `${LINUX}.json`), "utf8"),
+      );
+      expect(Object.keys(fragment.platforms)).toEqual([
+        "linux-x86_64",
+        "linux-x86_64-appimage",
+        "linux-x86_64-deb",
+      ]);
+      expect(fragment.platforms["linux-x86_64"].signature).toBe(
+        (
+          await readFile(
+            join(assets, "redrob-recall-0.2.0-linux-x86_64.AppImage.sig"),
+            "utf8",
+          )
+        ).trim(),
+      );
 
-      await writeFile(
-        releaseJson,
-        assets(
-          renameAll(V020, "0.2.0").filter((n) => n !== LAUNCHER_MANIFEST_NAME),
+      const assembleEnv = {
+        ...env,
+        TAURI_UPDATER_PUBLIC_KEY: publicKey,
+        REQUIRED_PLATFORMS: "linux-x86_64",
+        REQUIRED_LAUNCHER_TOKENS: "linux-x86_64",
+        REQUIRED_ASSET_SUFFIXES: ".AppImage .deb",
+      };
+      const assembled = execFileSync(
+        "node",
+        ["scripts/assemble-updater-manifest.mjs", assets, fragments, "0.2.0"],
+        { env: assembleEnv, encoding: "utf8" },
+      );
+      expect(assembled).toMatch(/linux-x86_64: VALID/);
+      expect(assembled).toMatch(/every one of 3 signatures verifies/);
+      const latest = JSON.parse(
+        await readFile(join(assets, "latest.json"), "utf8"),
+      );
+      expect(latest.version).toBe("0.2.0");
+      expect(latest.platforms["linux-x86_64"].url).toBe(
+        url("redrob-recall-0.2.0-linux-x86_64.AppImage"),
+      );
+
+      // A platform the matrix built but no leg wrote.
+      expect(() =>
+        execFileSync(
+          "node",
+          ["scripts/assemble-updater-manifest.mjs", assets, fragments, "0.2.0"],
+          {
+            env: {
+              ...assembleEnv,
+              REQUIRED_PLATFORMS: "linux-x86_64 darwin-aarch64",
+            },
+            stdio: "pipe",
+          },
         ),
+      ).toThrow(/no entry for built platform darwin-aarch64/);
+
+      // Bytes changed after signing (the AppImage repack, if its re-sign step were skipped).
+      await writeFile(
+        join(assets, "redrob-recall-0.2.0-linux-x86_64.AppImage"),
+        "repacked\n",
       );
       expect(() =>
         execFileSync(
           "node",
-          ["scripts/check-release-asset-names.mjs", releaseJson, "v0.2.0"],
-          { stdio: "pipe" },
+          ["scripts/assemble-updater-manifest.mjs", assets, fragments, "0.2.0"],
+          {
+            env: assembleEnv,
+            stdio: "pipe",
+          },
         ),
-      ).toThrow(/redrob-launcher\.json is not attached/);
+      ).toThrow(/updater signature does not verify/);
     } finally {
       await rm(dir, { recursive: true, force: true });
     }

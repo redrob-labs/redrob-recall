@@ -6,86 +6,72 @@
 // in TARGET_TOKENS below (linux-x86_64, macos-aarch64, windows-x64, ...). Tauri's bundler names
 // files `Redrob Recall_0.2.0_amd64.AppImage` (GitHub turns the space into a dot on upload), which
 // the launcher cannot parse: wrong stem, `_` separators, Debian's `amd64` instead of `x86_64`, and
-// no os token at all. So the release workflow renames every uploaded asset through
-// `launcherAssetName` and then asserts the result with `checkReleaseAssetNames`, so a bundler or
-// action upgrade that changes the file names cannot silently make the app uninstallable again.
+// no os token at all. So each build leg copies its bundles into the release artifact under the
+// name `launcherAssetName` gives (scripts/stage-release-assets.mjs) and the updater-manifest job
+// asserts the whole set with `checkReleaseAssetNames`, so a bundler upgrade that changes the file
+// names cannot silently make the app uninstallable again.
 //
-// This module is pure (no I/O) so it can be unit-tested; rename-release-assets.mjs and
-// check-release-asset-names.mjs do the GitHub calls.
+// `redrob-launcher.json` and `SHA256SUMS.txt` are not this repository's to write: the shared
+// redrob-labs release-publish workflow adds both when it creates the release.
+//
+// This module is pure (no I/O) so it can be unit-tested; stage-release-assets.mjs and
+// assemble-updater-manifest.mjs do the file work.
 
 export const STEM = "redrob-recall";
+export const PRODUCT_NAME = "Redrob Recall";
 
-// The one non-installer asset every release carries besides latest.json: Redrob Launcher reads it
-// from the release's own download URL to learn that this release reads the launcher's shared
-// account file (redrob-launcher docs/release-manifest.md, schema 1). `sharedAccount` is true
-// because develop reads the shared sign-in since #49. Unknown fields are ignored by the launcher,
-// so this object may grow; the schema number does not change for additions.
-export const LAUNCHER_MANIFEST_NAME = "redrob-launcher.json";
-// The exact bytes the contract shows, so `diff` against the launcher docs is a byte match.
-const LAUNCHER_MANIFEST_TEXT = '{ "schema": 1, "sharedAccount": true }\n';
-export const LAUNCHER_MANIFEST = JSON.parse(LAUNCHER_MANIFEST_TEXT);
+// Files the shared publish job adds beside the installers, and the updater manifest this
+// repository assembles itself. None of them is an installer, so none must parse as one.
+export const NON_INSTALLER_ASSETS = new Set([
+  "latest.json",
+  "redrob-launcher.json",
+  "SHA256SUMS.txt",
+]);
 
-/** The bytes the release workflow uploads as `redrob-launcher.json` (newline-terminated). */
-export function launcherManifestText() {
-  return LAUNCHER_MANIFEST_TEXT;
-}
-
-/**
- * Problems with the text of a `redrob-launcher.json`, empty when the launcher would read it as
- * "this release uses the shared sign-in".
- *
- * @param {string} text
- */
-export function checkLauncherManifest(text) {
-  let parsed;
-  try {
-    parsed = JSON.parse(text);
-  } catch (error) {
-    return [`${LAUNCHER_MANIFEST_NAME}: not JSON (${error.message})`];
-  }
-  const problems = [];
-  if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) {
-    return [`${LAUNCHER_MANIFEST_NAME}: must be a JSON object`];
-  }
-  if (parsed.schema !== 1) {
-    problems.push(
-      `${LAUNCHER_MANIFEST_NAME}: schema must be 1, got ${JSON.stringify(parsed.schema)}`,
-    );
-  }
-  if (parsed.sharedAccount !== true) {
-    problems.push(
-      `${LAUNCHER_MANIFEST_NAME}: sharedAccount must be true, got ${JSON.stringify(parsed.sharedAccount)}`,
-    );
-  }
-  if (!text.endsWith("\n")) {
-    problems.push(`${LAUNCHER_MANIFEST_NAME}: must end with a newline`);
-  }
-  return problems;
-}
-
-// Rust target triple -> { token the launcher expects, arch tokens Tauri puts in the file name }.
+// Rust target triple -> { token the launcher expects, arch tokens Tauri puts in the file name,
+// the updater platform key (`<os>-<arch>` as the Tauri updater resolves `{{target}}-{{arch}}`) }.
 // Tauri's arch token differs per bundle: `amd64`/`arm64` on .deb, `x86_64`/`aarch64` on .rpm and
 // .AppImage, `x64`/`arm64` on Windows, `aarch64`/`x64`/`universal` on macOS.
 export const TARGET_TOKENS = {
   "x86_64-unknown-linux-gnu": {
     token: "linux-x86_64",
     tauriArches: ["amd64", "x86_64"],
+    updater: "linux-x86_64",
   },
   "aarch64-unknown-linux-gnu": {
     token: "linux-aarch64",
     tauriArches: ["arm64", "aarch64"],
+    updater: "linux-aarch64",
   },
-  "aarch64-apple-darwin": { token: "macos-aarch64", tauriArches: ["aarch64"] },
-  "x86_64-apple-darwin": { token: "macos-x86_64", tauriArches: ["x64"] },
+  "aarch64-apple-darwin": {
+    token: "macos-aarch64",
+    tauriArches: ["aarch64"],
+    updater: "darwin-aarch64",
+  },
+  "x86_64-apple-darwin": {
+    token: "macos-x86_64",
+    tauriArches: ["x64"],
+    updater: "darwin-x86_64",
+  },
   "universal-apple-darwin": {
     token: "macos-universal",
     tauriArches: ["universal"],
+    updater: "darwin-universal",
   },
-  "x86_64-pc-windows-msvc": { token: "windows-x64", tauriArches: ["x64"] },
-  "aarch64-pc-windows-msvc": { token: "windows-arm64", tauriArches: ["arm64"] },
+  "x86_64-pc-windows-msvc": {
+    token: "windows-x64",
+    tauriArches: ["x64"],
+    updater: "windows-x86_64",
+  },
+  "aarch64-pc-windows-msvc": {
+    token: "windows-arm64",
+    tauriArches: ["arm64"],
+    updater: "windows-aarch64",
+  },
   "x86_64-unknown-freebsd": {
     token: "freebsd-x86_64",
     tauriArches: ["amd64", "x86_64"],
+    updater: "freebsd-x86_64",
   },
 };
 
@@ -129,7 +115,12 @@ function escapeRegExp(text) {
  * The launcher-readable name for one Tauri-named release asset, or null when the asset is not
  * one this build leg produced (already renamed, latest.json, another leg's arch, ...).
  *
- * @param {string} assetName name as GitHub lists it, e.g. "Redrob.Recall_0.2.1_amd64.AppImage.sig"
+ * Tauri writes the macOS updater payload as `Redrob Recall.app.tar.gz` with no version or arch
+ * in the name (bundle/macos/); that one is accepted for a macOS leg and named as if it carried
+ * the leg's arch, the way tauri-action used to rename it on upload.
+ *
+ * @param {string} assetName name as the bundler wrote it or as GitHub lists it, e.g.
+ *   "Redrob Recall_0.2.1_amd64.AppImage.sig" or "Redrob.Recall_0.2.1_amd64.AppImage.sig"
  * @param {string} version   release version without the leading "v"
  * @param {string} target    Rust target triple of the leg that built it
  */
@@ -139,6 +130,11 @@ export function launcherAssetName(assetName, version, target) {
     throw new Error(
       `unknown release target ${target}; add it to TARGET_TOKENS`,
     );
+  const os = leg.token.split("-")[0];
+  const bare = assetName.match(/^Redrob[ .]Recall(\.app\.tar\.gz(?:\.sig)?)$/);
+  if (bare && os === "macos") {
+    return `${STEM}-${version}-${leg.token}${bare[1]}`;
+  }
   // "Redrob Recall" locally, "Redrob.Recall" once GitHub has normalised the space.
   const match = assetName.match(
     new RegExp(
@@ -150,7 +146,7 @@ export function launcherAssetName(assetName, version, target) {
   if (!leg.tauriArches.includes(tauriArch)) return null;
   // Drop the WiX language tag (`_en-US.msi`); keep `-setup.exe`, `.app.tar.gz`, `.sig`, ....
   const suffix = rest.replace(/^_[a-z]{2}-[A-Z]{2}(?=\.)/, "");
-  if (!OS_SUFFIXES[leg.token.split("-")[0]].test(suffix)) return null;
+  if (!OS_SUFFIXES[os].test(suffix)) return null;
   return `${STEM}-${version}-${leg.token}${suffix}`;
 }
 
@@ -179,9 +175,8 @@ export function parseLauncherAssetName(assetName) {
 
 /**
  * Every asset on the release must carry a launcher-readable name for this version, except the
- * updater manifest and `redrob-launcher.json`, and the latter must be present: without it the
- * launcher falls back to its built-in table and cannot know this release reads the shared sign-in.
- * Returns the list of problems; empty means the release is installable.
+ * updater manifest and the files the shared publish job adds (NON_INSTALLER_ASSETS). Returns the
+ * list of problems; empty means the release is installable.
  *
  * @param {string[]} assetNames
  * @param {string} version
@@ -195,13 +190,8 @@ export function checkReleaseAssetNames(
 ) {
   const problems = [];
   const installableTokens = new Set();
-  if (!assetNames.includes(LAUNCHER_MANIFEST_NAME)) {
-    problems.push(
-      `${LAUNCHER_MANIFEST_NAME} is not attached; Redrob Launcher cannot see that this release uses the shared sign-in`,
-    );
-  }
   for (const name of assetNames) {
-    if (name === "latest.json" || name === LAUNCHER_MANIFEST_NAME) continue;
+    if (NON_INSTALLER_ASSETS.has(name)) continue;
     const parsed = parseLauncherAssetName(name);
     if (!parsed) {
       problems.push(
