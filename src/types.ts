@@ -11,7 +11,6 @@ export interface AppSettings {
   sendContextToRedrob: boolean;
   localApiEnabled: boolean;
   localApiPort: number;
-  redrobBaseUrl: string;
 }
 
 export interface IndexStats {
@@ -28,6 +27,8 @@ export interface IndexStats {
 export interface ConnectionStatus {
   connected: boolean;
   keyLabel?: string;
+  /** The key in use is Redrob Launcher's shared sign-in, not a key stored by this app. */
+  viaLauncher: boolean;
   endpoint: string;
   error?: string;
 }
@@ -38,6 +39,16 @@ export interface AppSnapshot {
   connection: ConnectionStatus;
   dataDirectory: string;
   appVersion: string;
+  /** One entry per library folder, in settings order. */
+  folders: FolderStatus[];
+}
+
+/** `present` is false when the folder is gone: the watcher skips it, so it is not watched. */
+export interface FolderStatus {
+  path: string;
+  present: boolean;
+  files: number;
+  failed: number;
 }
 
 export interface SearchFilters {

@@ -19,7 +19,6 @@ use std::{
     path::{Path, PathBuf},
     time::{Duration, SystemTime},
 };
-use tauri::Emitter;
 use zip::ZipArchive;
 
 pub fn configure_watcher(state: &AppState) -> Result<()> {
@@ -29,13 +28,16 @@ pub fn configure_watcher(state: &AppState) -> Result<()> {
         if !event.kind.is_create() && !event.kind.is_modify() && !event.kind.is_remove() {
             return;
         }
-        if state_for_callback.is_indexing() || state_for_callback.is_paused() {
+        if state_for_callback.is_paused() {
             return;
         }
+        // A change during a pass used to be dropped here (`is_indexing` -> return): a file saved
+        // after the pass had walked past it stayed stale until some later change. Queue it
+        // instead; `request_index` collapses a burst of events into at most one more pass.
         let state = state_for_callback.clone();
         tauri::async_runtime::spawn(async move {
             tokio::time::sleep(Duration::from_millis(900)).await;
-            let _ = start_full_index(state).await;
+            request_index(&state);
         });
     })?;
     for library_path in state.settings().library_paths {
@@ -55,14 +57,53 @@ pub async fn start_full_index(state: AppState) -> Result<()> {
     start_claimed_full_index(state).await
 }
 
+/// Start a pass, or -- if one is running -- make it run once more when it finishes.
+/// Returns whether a new pass was started.
+pub fn request_index(state: &AppState) -> bool {
+    if state.is_indexing() {
+        state.request_rescan();
+        return false;
+    }
+    let state = state.clone();
+    tauri::async_runtime::spawn(async move {
+        if let Err(error) = start_full_index(state.clone()).await {
+            tracing::error!(%error, "indexing failed");
+            state.set_indexing(false);
+            state.emit_snapshot();
+        }
+    });
+    true
+}
+
 pub(crate) async fn start_claimed_full_index(state: AppState) -> Result<()> {
     state.set_paused(false);
-    let worker_state = state.clone();
-    let result = tauri::async_runtime::spawn_blocking(move || run_full_index(&worker_state)).await;
-    state.set_current_file(None);
-    state.set_indexing(false);
-    state.emit_snapshot();
-    result?
+    loop {
+        let worker_state = state.clone();
+        let result =
+            tauri::async_runtime::spawn_blocking(move || run_requested_passes(&worker_state)).await;
+        state.set_current_file(None);
+        state.set_indexing(false);
+        state.emit_snapshot();
+        result??;
+        // A request can land after the last pass checked for one but before `indexing` was
+        // cleared; it saw a pass running and queued itself. Pick it up rather than drop it.
+        if state.is_paused() || !state.take_rescan_request() || !state.set_indexing(true) {
+            return Ok(());
+        }
+    }
+}
+
+/// One full pass, then another for as long as something asked for one meanwhile -- a folder added
+/// or Check now pressed while this pass was running. Without this the request was dropped: the
+/// command answered "already indexing" and the new folder waited for the next manual check.
+fn run_requested_passes(state: &AppState) -> Result<()> {
+    state.take_rescan_request();
+    loop {
+        run_full_index(state)?;
+        if state.is_paused() || state.is_shutting_down() || !state.take_rescan_request() {
+            return Ok(());
+        }
+    }
 }
 
 fn run_full_index(state: &AppState) -> Result<()> {
@@ -90,10 +131,14 @@ fn run_full_index(state: &AppState) -> Result<()> {
         .map(|path| path.to_string_lossy().to_string())
         .collect::<Vec<_>>();
 
+    // How far this pass got. A paused pass reported `processed: total`, so the progress card read
+    // "Indexing paused 100%" with most of the library unread.
+    let mut reached = 0u64;
     for (position, path) in files.iter().enumerate() {
         if state.is_paused() || state.is_shutting_down() {
             break;
         }
+        reached = position as u64 + 1;
         let display_name = path
             .file_name()
             .and_then(|name| name.to_str())
@@ -153,7 +198,7 @@ fn run_full_index(state: &AppState) -> Result<()> {
     emit_progress(
         state,
         IndexProgress {
-            processed: total,
+            processed: reached,
             total,
             current_file: None,
             status: if state.is_paused() {
@@ -281,7 +326,19 @@ fn index_file(state: &AppState, path: &Path) -> Result<()> {
             .iter()
             .map(|chunk| chunk.content.clone())
             .collect::<Vec<_>>();
-        let embeddings = state.embedder().embed_passages(&texts)?;
+        let embeddings = match state.embedder().embed_passages(&texts) {
+            Ok(embeddings) => embeddings,
+            Err(error) => {
+                // The model is downloaded on first use, so offline or with its host blocked this
+                // fails for EVERY file. Failing the file here used to delete its keyword chunks too
+                // (`mark_document_failed`), leaving a library with nothing searchable at all, while
+                // search itself already falls back to keywords when vectors are missing. The text is
+                // stored; leave the vectors `pending`, which `document_is_current` treats as stale,
+                // so the next index run embeds this file again.
+                tracing::warn!(path = %path.display(), %error, "embedding unavailable; keyword search only until the next index run");
+                return Ok(());
+            }
+        };
         let points = chunk_batch
             .iter()
             .zip(id_batch.iter())
@@ -515,6 +572,10 @@ fn system_time_string(value: SystemTime) -> String {
 }
 
 fn emit_progress(state: &AppState, progress: IndexProgress) {
-    let _ = state.app_handle().emit("index-progress", progress);
+    state.emit("index-progress", progress);
     state.emit_snapshot();
 }
+
+#[cfg(test)]
+#[path = "indexer_tests.rs"]
+mod tests;

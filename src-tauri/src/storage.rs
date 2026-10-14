@@ -1,5 +1,5 @@
 use crate::models::{
-    AppSettings, ChunkInput, ChunkRecord, DocumentRecord, IndexStats, IndexStatus,
+    AppSettings, ChunkInput, ChunkRecord, DocumentRecord, FolderStatus, IndexStats, IndexStatus,
 };
 use anyhow::{Context, Result};
 use chrono::Utc;
@@ -482,6 +482,44 @@ impl Storage {
         })
     }
 
+    /// Files and failures per library folder. A file belongs to the deepest folder that contains it,
+    /// so a folder added inside another is not counted twice. `present` is read from the disk here.
+    pub fn folder_stats(&self, folders: &[String]) -> Result<Vec<FolderStatus>> {
+        let connection = self.connection.lock();
+        let mut statement = connection.prepare("SELECT path, status = 'failed' FROM documents")?;
+        let rows = statement
+            .query_map([], |row| {
+                Ok((row.get::<_, String>(0)?, row.get::<_, bool>(1)?))
+            })?
+            .collect::<Result<Vec<_>, _>>()?;
+        let roots: Vec<std::path::PathBuf> = folders.iter().map(std::path::PathBuf::from).collect();
+        let mut out: Vec<FolderStatus> = folders
+            .iter()
+            .zip(&roots)
+            .map(|(path, root)| FolderStatus {
+                path: path.clone(),
+                present: root.is_dir(),
+                files: 0,
+                failed: 0,
+            })
+            .collect();
+        for (path, failed) in rows {
+            let file = std::path::Path::new(&path);
+            let owner = roots
+                .iter()
+                .enumerate()
+                .filter(|(_, root)| file.starts_with(root))
+                .max_by_key(|(_, root)| root.components().count());
+            if let Some((index, _)) = owner {
+                out[index].files += 1;
+                if failed {
+                    out[index].failed += 1;
+                }
+            }
+        }
+        Ok(out)
+    }
+
     pub fn remove_missing_documents(&self, existing_paths: &[String]) -> Result<Vec<u64>> {
         let connection = self.connection.lock();
         let mut statement = connection.prepare("SELECT path FROM documents")?;
@@ -819,6 +857,55 @@ mod tests {
         ));
         std::fs::create_dir_all(&directory).unwrap();
         directory.join("metadata.db")
+    }
+
+    #[test]
+    fn folder_stats_count_each_file_once_under_its_deepest_folder() {
+        let db = temporary_database("folders");
+        let root = db.parent().unwrap().join("library");
+        let inner = root.join("inner");
+        std::fs::create_dir_all(&inner).unwrap();
+        let storage = Storage::open(&db).unwrap();
+        let p = |path: &std::path::Path| path.to_string_lossy().to_string();
+        for file in [root.join("a.txt"), root.join("b.txt"), inner.join("c.txt")] {
+            storage
+                .replace_document(&p(&file), "x", "txt", "text/plain", "t", 1, "h", &[])
+                .unwrap();
+        }
+        storage
+            .mark_document_failed(
+                &p(&inner.join("bad.pdf")),
+                "bad.pdf",
+                "pdf",
+                "application/pdf",
+                "t",
+                1,
+                "broken",
+            )
+            .unwrap();
+        // A sibling whose name starts with the folder's must not be counted as inside it.
+        storage
+            .replace_document(
+                &format!("{}-old/d.txt", p(&root)),
+                "d",
+                "txt",
+                "text/plain",
+                "t",
+                1,
+                "h",
+                &[],
+            )
+            .unwrap();
+        let gone = db.parent().unwrap().join("unplugged-drive");
+
+        let stats = storage
+            .folder_stats(&[p(&root), p(&inner), p(&gone)])
+            .unwrap();
+        let summary: Vec<_> = stats
+            .iter()
+            .map(|f| (f.present, f.files, f.failed))
+            .collect();
+        assert_eq!(summary, vec![(true, 2, 0), (true, 2, 1), (false, 0, 0)]);
     }
 
     #[test]

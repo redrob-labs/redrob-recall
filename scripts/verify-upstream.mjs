@@ -40,7 +40,14 @@ const noticesPath = join(root, "UPSTREAM_NOTICES.md");
 // then do. For `code` the re-sync method is a diff against the upstream file; for `translated` there is no
 // file to diff and behaviour is the only thing comparable. Calling both `code` sends the next reader
 // looking for a diff that cannot exist. redrob-canvas made the same distinction for its Krita work.
-const KINDS = ["code", "translated", "algorithm", "library", "protocol", "redistributed"];
+const KINDS = [
+  "code",
+  "translated",
+  "algorithm",
+  "library",
+  "protocol",
+  "redistributed",
+];
 // PERMISSIVE ONLY, and this is where this file deliberately differs from redrob-query's otherwise
 // identical validator. That product is GPL-3.0-or-later and can absorb copyleft; this one is
 // Apache-2.0 and cannot. Copying GPL or LGPL source in here would force this whole product to GPL --
@@ -50,7 +57,8 @@ const KINDS = ["code", "translated", "algorithm", "library", "protocol", "redist
 // Copying query's regex across unchanged would have silently permitted exactly that, which is the
 // single most likely way this check gets broken later. If a copyleft source ever genuinely needs to
 // come in, the relicense is the decision and widening this list is its consequence -- in that order.
-const INBOUND_OK = /Apache-2\.0|MIT|BSD-2-Clause|BSD-3-Clause|ISC|Zlib|Unlicense|CC0/;
+const INBOUND_OK =
+  /Apache-2\.0|MIT|BSD-2-Clause|BSD-3-Clause|ISC|Zlib|Unlicense|CC0/;
 const COPYLEFT = /GPL|AGPL|LGPL|MPL|SSPL|EUPL|CDDL|OSL/;
 
 const problems = [];
@@ -60,7 +68,9 @@ if (!existsSync(pinsPath)) {
   process.exit(1);
 }
 const pins = readFileSync(pinsPath, "utf8");
-const notices = existsSync(noticesPath) ? readFileSync(noticesPath, "utf8") : "";
+const notices = existsSync(noticesPath)
+  ? readFileSync(noticesPath, "utf8")
+  : "";
 if (!notices) problems.push("UPSTREAM_NOTICES.md is missing");
 
 // A deliberately small TOML reader: section headers and `key = "value"` lines. The file is ours and
@@ -102,30 +112,43 @@ for (const [name, body] of sections) {
   if (!body.repository) {
     problems.push(`${name}.repository is missing`);
   } else if (!body.repository.startsWith("https://")) {
-    problems.push(`${name}.repository is not https: ${JSON.stringify(body.repository)}`);
+    problems.push(
+      `${name}.repository is not https: ${JSON.stringify(body.repository)}`,
+    );
   }
 
   // A pin is either an exact commit or a version floor. `code` and `algorithm` need the commit:
   // copying from a moving target is unreproducible, and so is comparing behaviour against "1.12 or
   // later". A `library` is legitimately pinned by `minimum_version` -- we link whatever the system or
   // registry provides at or above that floor, and no single commit describes it.
-  const exact = body.kind === "code" || body.kind === "translated" || body.kind === "algorithm";
+  const exact =
+    body.kind === "code" ||
+    body.kind === "translated" ||
+    body.kind === "algorithm";
   if (body.commit) {
     if (!/^[0-9a-f]{40}$/.test(body.commit)) {
-      problems.push(`${name}.commit is not a full 40-character sha: ${JSON.stringify(body.commit)}`);
+      problems.push(
+        `${name}.commit is not a full 40-character sha: ${JSON.stringify(body.commit)}`,
+      );
     }
   } else if (exact) {
-    problems.push(`${name}.kind is ${JSON.stringify(body.kind)} so it must pin an exact commit`);
+    problems.push(
+      `${name}.kind is ${JSON.stringify(body.kind)} so it must pin an exact commit`,
+    );
   } else if (!body.minimum_version && !body.version) {
     // `version` is the redistributed kind's pin, `minimum_version` the library kind's floor.
-    problems.push(`${name} pins neither a commit, a version, nor a minimum_version`);
+    problems.push(
+      `${name} pins neither a commit, a version, nor a minimum_version`,
+    );
   }
 
   if (body.kind === "redistributed") {
     // An attribution obligation attaches to ONE build, so a floor like ">= 0.8" would leave the notice
     // pointing at a version range rather than the thing actually shipped.
     if (!body.version) {
-      problems.push(`${name}.kind is "redistributed" so it must pin an exact version`);
+      problems.push(
+        `${name}.kind is "redistributed" so it must pin an exact version`,
+      );
     } else if (/^[<>^~]|\s-\s|\|\|/.test(String(body.version))) {
       problems.push(
         `${name}.version must be one exact version, not a range: ${JSON.stringify(body.version)}`,
@@ -134,14 +157,20 @@ for (const [name, body] of sections) {
     // What a recipient actually receives, so that is where the attribution has to be.
     const noticePath = join(root, "NOTICE");
     if (!existsSync(noticePath)) {
-      problems.push(`${name} is redistributed but NOTICE is missing, so no attribution ships with it`);
+      problems.push(
+        `${name} is redistributed but NOTICE is missing, so no attribution ships with it`,
+      );
     }
   }
 
   if (body.kind === undefined) {
-    problems.push(`${name} declares no kind; must be one of ${KINDS.join(", ")}`);
+    problems.push(
+      `${name} declares no kind; must be one of ${KINDS.join(", ")}`,
+    );
   } else if (!KINDS.includes(body.kind)) {
-    problems.push(`${name}.kind is ${JSON.stringify(body.kind)}, not one of ${KINDS.join(", ")}`);
+    problems.push(
+      `${name}.kind is ${JSON.stringify(body.kind)}, not one of ${KINDS.join(", ")}`,
+    );
   }
 
   // A protocol is spoken, not licensed to us, so it needs no licence line. Everything else does.
@@ -154,7 +183,9 @@ for (const [name, body] of sections) {
 
   const heading = new RegExp(`^##\\s+${name}\\s*$`, "im");
   if (!heading.test(notices)) {
-    problems.push(`${name}.kind is '${kind}' but UPSTREAM_NOTICES.md has no '## ${name}' section`);
+    problems.push(
+      `${name}.kind is '${kind}' but UPSTREAM_NOTICES.md has no '## ${name}' section`,
+    );
   }
   if (body.commit && !notices.includes(body.commit)) {
     problems.push(
@@ -218,7 +249,11 @@ if (existsSync(matrixPath)) {
   // crate actually shipped rather than the server -- made a literal word match fail and reported the
   // matrix row as naming an unregistered authority. The check was right to fire; matching an identifier
   // against prose letter for letter was the part that was too strict.
-  const loose = (value) => value.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+  const loose = (value) =>
+    value
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, " ")
+      .trim();
   for (const row of rows) {
     const cells = row.split("|");
     const authority = cells[3] ?? "";
@@ -227,8 +262,11 @@ if (existsSync(matrixPath)) {
       const name = loose(n);
       return new RegExp(`\\b${name.replace(/ /g, "\\s+")}\\b`).test(target);
     });
-    if (registered || EXEMPT_AUTHORITY.some((re) => re.test(authority))) continue;
-    unknown.push(`${(cells[2] ?? "").trim().slice(0, 48)} -> ${authority.trim().slice(0, 40)}`);
+    if (registered || EXEMPT_AUTHORITY.some((re) => re.test(authority)))
+      continue;
+    unknown.push(
+      `${(cells[2] ?? "").trim().slice(0, 48)} -> ${authority.trim().slice(0, 40)}`,
+    );
   }
   if (unknown.length > 0) {
     console.error(
@@ -254,7 +292,9 @@ if (existsSync(matrixPath)) {
   let covered = null;
   try {
     covered = new Set(
-      execSync("node scripts/verify-upstream-grammar.mjs --list", { encoding: "utf8" })
+      execSync("node scripts/verify-upstream-grammar.mjs --list", {
+        encoding: "utf8",
+      })
         .trim()
         .split("\n")
         .map((line) => line.trim())
@@ -263,22 +303,88 @@ if (existsSync(matrixPath)) {
   } catch (error) {
     // A harness that cannot be asked makes every citation into it unverifiable, so this fails rather
     // than passing.
-    console.error(`error: the grammar harness could not list its coverage: ${error.message.split("\n")[0]}`);
+    console.error(
+      `error: the grammar harness could not list its coverage: ${error.message.split("\n")[0]}`,
+    );
     process.exit(1);
   }
 
   const cellsOf = (row) =>
-    row.trim().replace(/^\||\|$/g, "").split("|").map((cell) => cell.trim());
+    row
+      .trim()
+      .replace(/^\||\|$/g, "")
+      .split("|")
+      .map((cell) => cell.trim());
   let parityRows = 0;
   let citingRows = 0;
   const cited = new Set();
   const matrixProblems = [];
 
+  // The feature table is the one headed `| Domain`. Its rows are identified by position, not by shape, so a
+  // row with a stray `|` is rejected rather than silently skipped -- measured in redrob-query, where an
+  // 8-cell row fell out of the parse and the guard passed one row short.
+  const featureRows = new Set();
+  {
+    let inFeatureTable = false;
+    for (const line of matrix.split("\n")) {
+      if (line.startsWith("| Domain")) inFeatureTable = true;
+      else if (!line.startsWith("|")) inFeatureTable = false;
+      else if (inFeatureTable && !/^[|\-\s]+$/.test(line))
+        featureRows.add(line);
+    }
+  }
+  // `Works` answers a different question from `Status`: `native` meant "the code is here", and the shipped
+  // app had native rows no button reaches (docs/user-paths.md). `yes` needs a citation of a test that drives
+  // the feature the way a user does -- `e2e:<path>::<name>`, where <path> exists and contains <name>.
+  const E2E = /`e2e:([A-Za-z0-9_./-]+)::([A-Za-z0-9_]+)`/g;
+  let workingRows = 0;
+
   for (const row of rows) {
+    if (!featureRows.has(row)) continue;
     const cells = cellsOf(row);
-    if (cells.length !== 6) continue;
-    const [domain, feature, , , status, evidence] = cells;
-    const keys = [...evidence.matchAll(/`([a-z-]+):([a-z0-9-]+)`/g)].map((m) => [m[1], m[2]]);
+    if (cells.length !== 7) {
+      matrixProblems.push(
+        `${cells[0]}/${(cells[1] ?? "").slice(0, 40)} ` +
+          (cells.length === 6
+            ? "has no Works column"
+            : `has ${cells.length} cells; expected 7`),
+      );
+      continue;
+    }
+    const [domain, feature, , , status, evidence, works] = cells;
+    if (works !== "yes" && works !== "no") {
+      matrixProblems.push(
+        `${domain}/${feature.slice(0, 40)} Works must be yes or no, not '${works}'`,
+      );
+    } else if (works === "yes") {
+      workingRows += 1;
+      if (status === "planned") {
+        matrixProblems.push(
+          `${domain}/${feature.slice(0, 40)} is planned but claims Works: yes`,
+        );
+      }
+      const e2e = [...evidence.matchAll(E2E)];
+      if (!e2e.length) {
+        matrixProblems.push(
+          `${domain}/${feature.slice(0, 40)} claims Works: yes but cites no \`e2e:<path>::<name>\``,
+        );
+      }
+      for (const [, path, name] of e2e) {
+        const target = join(root, path);
+        if (!existsSync(target)) {
+          matrixProblems.push(
+            `${domain}/${feature.slice(0, 40)} cites \`e2e:${path}::${name}\` but ${path} does not exist`,
+          );
+        } else if (!readFileSync(target, "utf8").includes(name)) {
+          matrixProblems.push(
+            `${domain}/${feature.slice(0, 40)} cites \`e2e:${path}::${name}\` but ${path} has no ${name}`,
+          );
+        }
+      }
+    }
+    const keys = [...evidence.matchAll(/`([a-z-]+):([a-z0-9-]+)`/g)].map(
+      (m) => [m[1], m[2]],
+    );
     if (status === "parity") {
       parityRows += 1;
       if (!keys.length) {
@@ -292,7 +398,9 @@ if (existsSync(matrixPath)) {
     for (const [prefix, key] of keys) {
       cited.add(`${prefix}:${key}`);
       if (prefix !== "grammar") {
-        matrixProblems.push(`${domain}/${feature.slice(0, 40)} cites unknown harness '${prefix}'`);
+        matrixProblems.push(
+          `${domain}/${feature.slice(0, 40)} cites unknown harness '${prefix}'`,
+        );
       } else if (!covered.has(key)) {
         matrixProblems.push(
           `${domain}/${feature.slice(0, 40)} cites \`grammar:${key}\` but that harness makes no such check`,
@@ -310,7 +418,8 @@ if (existsSync(matrixPath)) {
   const uncited = [...covered].filter((key) => !cited.has(`grammar:${key}`));
   console.log(
     `compatibility matrix: ${rows.length} rows, every authority accounted for, ` +
-      `${parityRows} parity claim(s), ${citingRows} row(s) citing a harness`,
+      `${parityRows} parity claim(s), ${citingRows} row(s) citing a harness, ` +
+      `${workingRows} working (driven end to end by a cited test)`,
   );
   if (uncited.length) {
     console.log(`  grammar checks no row cites: ${uncited.join(", ")}`);

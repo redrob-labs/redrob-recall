@@ -6,11 +6,15 @@ import {
   useState,
   type FormEvent,
   type ReactNode,
+  type KeyboardEvent as ReactKeyboardEvent,
 } from "react";
 import { Loader, Mark, type IconName } from "@redrob-labs/ui";
 import symbolDark from "./assets/brand/redrob-symbol-solid-white.png";
 import symbolLight from "./assets/brand/redrob-symbol.png";
 import { Icon } from "./ui/Icon";
+import { Highlighted } from "./highlight";
+import { stepIndex } from "./resultNav";
+import { inMissingFolder } from "./folders";
 import { bridge } from "./lib/bridge";
 import type {
   AppSettings,
@@ -28,6 +32,20 @@ type Toast = {
   tone: "success" | "error" | "info";
 };
 
+/**
+ * The browser build runs on a mock bridge: folders, indexing and search are simulated. Say so on
+ * every screen, so a browser preview is never mistaken for the desktop app.
+ */
+function DemoBanner() {
+  if (bridge.isDesktop) return null;
+  return (
+    <div className="demo-banner" role="status" data-testid="demo-banner">
+      <span>DEMO</span> Browser preview · folders and indexing are simulated,
+      sample data only
+    </div>
+  );
+}
+
 export default function App() {
   const [snapshot, setSnapshot] = useState<AppSnapshot | null>(null);
   const [progress, setProgress] = useState<IndexProgress | null>(null);
@@ -40,12 +58,21 @@ export default function App() {
     (message: string, tone: Toast["tone"] = "info") => {
       const id = ++toastCounter.current;
       setToasts((current) => [...current, { id, message, tone }]);
-      window.setTimeout(
-        () =>
-          setToasts((current) => current.filter((toast) => toast.id !== id)),
-        3500,
-      );
+      // An error stays until it is dismissed: it is often a path plus a reason, and 3.5 s was too
+      // short to read one, let alone act on it.
+      if (tone !== "error")
+        window.setTimeout(
+          () =>
+            setToasts((current) => current.filter((toast) => toast.id !== id)),
+          3500,
+        );
     },
+    [],
+  );
+
+  const dismissToast = useCallback(
+    (id: number) =>
+      setToasts((current) => current.filter((toast) => toast.id !== id)),
     [],
   );
 
@@ -79,8 +106,14 @@ export default function App() {
       }
     };
     void register();
+    // Redrob Launcher's shared sign-in is read fresh on every snapshot, but nothing on this side
+    // emits when the person signs in or out over there. Coming back to this window is the moment
+    // that most often follows, so re-read then.
+    const onFocus = () => void refresh();
+    window.addEventListener("focus", onFocus);
     return () => {
       cancelled = true;
+      window.removeEventListener("focus", onFocus);
       unlisteners.forEach((unlisten) => unlisten());
     };
   }, [refresh]);
@@ -92,11 +125,21 @@ export default function App() {
     return <BootState />;
   }
   if (snapshot.settings.libraryPaths.length === 0) {
-    return <Onboarding snapshot={snapshot} refresh={refresh} notify={notify} />;
+    return (
+      <>
+        <DemoBanner />
+        <Onboarding snapshot={snapshot} refresh={refresh} notify={notify} />
+        {/* Onboarding is where the first folder is chosen, so its refusals must be visible
+            here too. The stack used to render only in the main shell, so every error on this
+            screen was swallowed and the button looked like it did nothing. */}
+        <ToastStack toasts={toasts} dismiss={dismissToast} />
+      </>
+    );
   }
 
   return (
     <div className="app-shell">
+      <DemoBanner />
       <Sidebar view={view} setView={setView} snapshot={snapshot} />
       <main className="workspace">
         {view === "search" && (
@@ -113,7 +156,7 @@ export default function App() {
       {progress && progress.status !== "idle" && (
         <ProgressBar progress={progress} />
       )}
-      <ToastStack toasts={toasts} />
+      <ToastStack toasts={toasts} dismiss={dismissToast} />
     </div>
   );
 }
@@ -160,9 +203,16 @@ function Sidebar({
               snapshot.stats.status === "indexing" ? "pulse-dot" : "status-dot"
             }
           />
-          <span>{statusLabel(snapshot.stats.status)}</span>
+          <span
+            data-testid="library-status"
+            data-status={snapshot.stats.status}
+          >
+            {statusLabel(snapshot.stats.status)}
+          </span>
         </div>
-        <strong>{formatNumber(snapshot.stats.documents)} files</strong>
+        <strong data-testid="library-count">
+          {formatNumber(snapshot.stats.documents)} files
+        </strong>
         <span>{formatBytes(snapshot.stats.totalBytes)} indexed locally</span>
       </div>
       <button
@@ -195,8 +245,8 @@ function Onboarding({
       setAdding(true);
       const path = await bridge.chooseFolder();
       if (!path) return;
+      // Adding a folder schedules its indexing on the desktop side, even mid-pass.
       await bridge.addLibraryPath(path);
-      await bridge.startIndexing();
       await refresh();
       notify("Folder added. Local indexing has started.", "success");
     } catch (error) {
@@ -226,6 +276,7 @@ function Onboarding({
           </p>
           <button
             className="primary large"
+            data-testid="choose-folders"
             onClick={() => void addFolder()}
             disabled={adding}
           >
@@ -300,6 +351,8 @@ function SearchView({
   const [selected, setSelected] = useState<SearchResult | null>(null);
   const [searching, setSearching] = useState(false);
   const [hasSearched, setHasSearched] = useState(false);
+  // The words the shown results were found for -- not the box, which may have been edited since.
+  const [searchedFor, setSearchedFor] = useState("");
   const [extension, setExtension] = useState("all");
   const inputRef = useRef<HTMLInputElement>(null);
 
@@ -330,12 +383,32 @@ function SearchView({
         },
       });
       setResults(found);
+      setSearchedFor(searchQuery);
       setSelected(found[0] ?? null);
     } catch (error) {
       notify(readError(error), "error");
     } finally {
       setSearching(false);
     }
+  };
+  const listRef = useRef<HTMLDivElement>(null);
+  // Up and Down move through the results from the search box or the list, as a search list should.
+  // From the box the caret stays put so typing can go on; Home and End stay the box's own keys there.
+  const moveSelection = (
+    event: ReactKeyboardEvent<HTMLElement>,
+    fromInput: boolean,
+  ) => {
+    if (fromInput && (event.key === "Home" || event.key === "End")) return;
+    const current = results.findIndex((r) => r.chunkId === selected?.chunkId);
+    const next = stepIndex(results.length, current, event.key);
+    if (next === null) return;
+    event.preventDefault();
+    setSelected(results[next]);
+    const card = listRef.current?.querySelectorAll<HTMLElement>(
+      "[data-testid=result-card]",
+    )[next];
+    card?.scrollIntoView({ block: "nearest" });
+    if (!fromInput) card?.focus();
   };
   const submit = (event: FormEvent) => {
     event.preventDefault();
@@ -358,8 +431,8 @@ function SearchView({
         </div>
         <div className="header-meta">
           <span>
-            <Icon name="database" /> {formatNumber(snapshot.stats.indexedChunks)}{" "}
-            passages
+            <Icon name="database" />{" "}
+            {formatNumber(snapshot.stats.indexedChunks)} passages
           </span>
           <span className={snapshot.stats.status === "idle" ? "ready" : "busy"}>
             {snapshot.stats.status === "idle" ? (
@@ -377,7 +450,9 @@ function SearchView({
           ref={inputRef}
           value={query}
           onChange={(event) => setQuery(event.target.value)}
+          onKeyDown={(event) => moveSelection(event, true)}
           placeholder="Describe what you remember…"
+          data-testid="search-input"
           aria-label="Search your library"
         />
         <kbd>⌘ K</kbd>
@@ -399,6 +474,7 @@ function SearchView({
         )}
         <button
           className="search-submit"
+          data-testid="search-submit"
           aria-label={searching ? "Searching" : "Search"}
           disabled={searching || !query.trim()}
         >
@@ -440,9 +516,7 @@ function SearchView({
           <section className="results-column">
             <div className="results-toolbar">
               <strong>
-                {searching
-                  ? "Searching locally…"
-                  : `${results.length} relevant passages`}
+                {searching ? "Searching locally…" : resultSummary(results)}
               </strong>
               <div className="extension-tabs">
                 {extensions.map((item) => (
@@ -462,11 +536,17 @@ function SearchView({
             {results.length === 0 && !searching ? (
               <NoResults />
             ) : (
-              <div className="result-list">
+              <div
+                className="result-list"
+                ref={listRef}
+                onKeyDown={(event) => moveSelection(event, false)}
+              >
                 {results.map((result) => (
                   <ResultCard
                     key={result.chunkId}
                     result={result}
+                    query={searchedFor}
+                    missing={inMissingFolder(result.path, snapshot.folders)}
                     active={selected?.chunkId === result.chunkId}
                     onClick={() => setSelected(result)}
                   />
@@ -478,6 +558,8 @@ function SearchView({
             {selected ? (
               <ResultPreview
                 result={selected}
+                query={searchedFor}
+                missing={inMissingFolder(selected.path, snapshot.folders)}
                 notify={notify}
                 ask={() => setView("ask")}
               />
@@ -496,16 +578,22 @@ function SearchView({
 
 function ResultCard({
   result,
+  query,
+  missing,
   active,
   onClick,
 }: {
   result: SearchResult;
+  query: string;
+  missing: boolean;
   active: boolean;
   onClick: () => void;
 }) {
   return (
     <button
       className={active ? "result-card active" : "result-card"}
+      data-testid="result-card"
+      aria-current={active ? "true" : undefined}
       onClick={onClick}
     >
       <div className={`file-icon ${result.extension}`}>
@@ -514,13 +602,16 @@ function ResultCard({
       <div className="result-main">
         <div className="result-title">
           <strong>{result.name}</strong>
-          <span>{relevanceLabel(result.score)}</span>
+          <span data-match={matchKind(result)}>{relevanceLabel(result)}</span>
         </div>
         <div className="result-path">
           {shortenPath(result.path)}
           {result.page ? ` · Page ${result.page}` : ""}
+          {missing && <span className="folder-gone"> · Folder not found</span>}
         </div>
-        <p>{result.snippet ?? result.content}</p>
+        <p>
+          <Highlighted text={result.snippet ?? result.content} query={query} />
+        </p>
       </div>
     </button>
   );
@@ -528,10 +619,14 @@ function ResultCard({
 
 function ResultPreview({
   result,
+  query,
+  missing,
   notify,
   ask,
 }: {
   result: SearchResult;
+  query: string;
+  missing: boolean;
   notify: Notify;
   ask: () => void;
 }) {
@@ -552,12 +647,23 @@ function ResultPreview({
   return (
     <div className="preview-content">
       <div className="preview-actions">
-        <button className="secondary" onClick={() => void open()}>
+        {/* The text is still indexed, but the file is not on disk: say so instead of failing. */}
+        <button
+          className="secondary"
+          disabled={missing}
+          title={
+            missing
+              ? "Its folder is not found -- reconnect the drive or remove the folder"
+              : undefined
+          }
+          onClick={() => void open()}
+        >
           <Icon name="external" /> Open file
         </button>
         <button
           className="icon-button"
-          title="Show in folder"
+          title={missing ? "Its folder is not found" : "Show in folder"}
+          disabled={missing}
           onClick={() => void reveal()}
         >
           <Icon name="folderOpen" size={24} />
@@ -569,17 +675,15 @@ function ResultPreview({
       <h2>{result.name}</h2>
       <span className="preview-location">{result.path}</span>
       <div className="match-meter">
-        <span>
-          <i style={{ width: `${Math.round(result.score * 100)}%` }} />
-        </span>
-        <strong>{relevanceLabel(result.score)}</strong>
-        <small>search relevance</small>
+        <strong data-match={matchKind(result)}>{relevanceLabel(result)}</strong>
       </div>
       <div className="passage-label">
         <span>RELEVANT PASSAGE</span>
         {result.page && <span>PAGE {result.page}</span>}
       </div>
-      <blockquote>{result.content}</blockquote>
+      <blockquote>
+        <Highlighted text={result.content} query={query} />
+      </blockquote>
       <button className="ask-about" onClick={ask}>
         <Icon name="sparkle" size={24} />
         <span>Ask about this and related files</span>
@@ -665,8 +769,8 @@ function AskView({
                 {formatNumber(snapshot.stats.indexedChunks)} passages
               </span>
               <span>
-                <Loader size="sm" label="Reading the strongest evidence" /> Reading the
-                strongest evidence
+                <Loader size="sm" label="Reading the strongest evidence" />{" "}
+                Reading the strongest evidence
               </span>
               <span>Composing an answer with citations</span>
             </div>
@@ -807,9 +911,8 @@ function SourcesView({
       const path = await bridge.chooseFolder();
       if (!path) return;
       await bridge.addLibraryPath(path);
-      await bridge.startIndexing();
       await refresh();
-      notify("Source folder added.", "success");
+      notify("Source folder added. It will be indexed next.", "success");
     } catch (error) {
       notify(readError(error), "error");
     }
@@ -863,40 +966,120 @@ function SourcesView({
             <h2>Watched folders</h2>
             <p>Changes here are picked up automatically.</p>
           </div>
-          <button
-            className="secondary"
-            onClick={() =>
-              void bridge
-                .startIndexing()
-                .then(refresh)
-                .catch((error) => notify(readError(error), "error"))
-            }
-          >
-            <Icon name="refresh" /> Check now
-          </button>
+          <div className="section-actions">
+            <button
+              className="secondary"
+              onClick={() =>
+                void bridge
+                  .startIndexing()
+                  .then((started) => {
+                    // `false` means a pass is already running; it will run again after it.
+                    notify(
+                      started
+                        ? "Checking your library for changes."
+                        : "Indexing is in progress; your library will be checked again when it finishes.",
+                      "success",
+                    );
+                    return refresh();
+                  })
+                  .catch((error) => notify(readError(error), "error"))
+              }
+            >
+              <Icon name="refresh" /> Check now
+            </button>
+            {/* Pause was implemented end to end (pause_indexing, honoured per file by the indexer) and
+              reachable from nowhere -- which also left Backup and Clear, which refuse while indexing,
+              with no way to satisfy them except waiting the whole pass out. */}
+            {(snapshot.stats.status === "indexing" ||
+              snapshot.stats.status === "scanning") && (
+              <button
+                className="secondary"
+                data-testid="pause-indexing"
+                onClick={() =>
+                  void bridge
+                    .pauseIndexing()
+                    .then(() => {
+                      notify(
+                        "Indexing will pause after the current file.",
+                        "success",
+                      );
+                      return refresh();
+                    })
+                    .catch((error) => notify(readError(error), "error"))
+                }
+              >
+                <Icon name="pause" /> Pause
+              </button>
+            )}
+            {snapshot.stats.status === "paused" && (
+              <button
+                className="secondary"
+                data-testid="resume-indexing"
+                onClick={() =>
+                  void bridge
+                    .startIndexing()
+                    .then(() => {
+                      notify("Indexing resumed.", "success");
+                      return refresh();
+                    })
+                    .catch((error) => notify(readError(error), "error"))
+                }
+              >
+                <Icon name="play" /> Resume
+              </button>
+            )}
+          </div>
         </div>
         <div className="folder-list">
-          {snapshot.settings.libraryPaths.map((path) => (
-            <div className="folder-row" key={path}>
-              <span className="folder-icon">
-                <Icon name="folder" size={24} />
-              </span>
-              <div>
-                <strong>{lastPathPart(path)}</strong>
-                <span>{path}</span>
-              </div>
-              <span className="watching">
-                <span className="status-dot" /> Watching
-              </span>
-              <button
-                className="icon-button danger"
-                title="Remove folder"
-                onClick={() => void removeFolder(path)}
+          {snapshot.settings.libraryPaths.map((path) => {
+            const folder = snapshot.folders.find((f) => f.path === path);
+            const missing = folder ? !folder.present : false;
+            const paused = snapshot.stats.status === "paused";
+            return (
+              <div
+                className="folder-row"
+                key={path}
+                data-missing={missing || undefined}
               >
-                <Icon name="trash" />
-              </button>
-            </div>
-          ))}
+                <span className="folder-icon">
+                  <Icon name="folder" size={24} />
+                </span>
+                <div>
+                  <strong>{lastPathPart(path)}</strong>
+                  <span>{path}</span>
+                  {folder && !missing && (
+                    <span className="folder-count">
+                      {folder.files.toLocaleString()}{" "}
+                      {folder.files === 1 ? "file" : "files"}
+                      {folder.failed > 0 &&
+                        ` · ${folder.failed.toLocaleString()} failed`}
+                    </span>
+                  )}
+                </div>
+                {/* Only a folder that is there is watched: indexer.rs skips one that is gone. */}
+                <span
+                  className="watching"
+                  data-state={
+                    missing ? "missing" : paused ? "paused" : "watching"
+                  }
+                >
+                  <span className="status-dot" />{" "}
+                  {missing
+                    ? "Folder not found"
+                    : paused
+                      ? "Paused"
+                      : "Watching"}
+                </span>
+                <button
+                  className="icon-button danger"
+                  title="Remove folder"
+                  onClick={() => void removeFolder(path)}
+                >
+                  <Icon name="trash" />
+                </button>
+              </div>
+            );
+          })}
         </div>
       </section>
       <section className="source-section">
@@ -919,39 +1102,54 @@ function SourcesView({
               <span>Modified</span>
               <span>Status</span>
             </div>
-            {documents.slice(0, 12).map((document) => (
-              <button
-                className="table-row"
-                key={document.id}
-                onClick={() =>
-                  void bridge
-                    .openSource(document.path)
-                    .catch((error) => notify(readError(error), "error"))
-                }
-              >
-                <span className="document-name">
-                  <span className={`tiny-file ${document.extension}`}>
-                    <FileTypeIcon extension={document.extension} />
-                  </span>
-                  <span>
-                    <strong>{document.name}</strong>
-                    <small>{shortenPath(document.path)}</small>
-                  </span>
-                </span>
-                <span>{document.extension.toUpperCase()}</span>
-                <span>{document.chunkCount}</span>
-                <span>{formatDate(document.modifiedAt)}</span>
-                <span
-                  className={
-                    document.status === "indexed"
-                      ? "doc-status good"
-                      : "doc-status bad"
+            {/* Failed files first: the list shows only 12, and a failure that falls below the
+                cut is a "Needs attention" count with nothing to attend to. */}
+            {[...documents]
+              .sort(
+                (a, b) =>
+                  Number(a.status === "indexed") -
+                  Number(b.status === "indexed"),
+              )
+              .slice(0, 12)
+              .map((document) => (
+                <button
+                  className="table-row"
+                  key={document.id}
+                  onClick={() =>
+                    void bridge
+                      .openSource(document.path)
+                      .catch((error) => notify(readError(error), "error"))
                   }
                 >
-                  {document.status === "indexed" ? "Ready" : "Failed"}
-                </span>
-              </button>
-            ))}
+                  <span className="document-name">
+                    <span className={`tiny-file ${document.extension}`}>
+                      <FileTypeIcon extension={document.extension} />
+                    </span>
+                    <span>
+                      <strong>{document.name}</strong>
+                      <small>{shortenPath(document.path)}</small>
+                      {document.status !== "indexed" && document.lastError && (
+                        // Why it failed, which the indexer records and the table used to drop.
+                        <small className="doc-error">
+                          {document.lastError}
+                        </small>
+                      )}
+                    </span>
+                  </span>
+                  <span>{document.extension.toUpperCase()}</span>
+                  <span>{document.chunkCount}</span>
+                  <span>{formatDate(document.modifiedAt)}</span>
+                  <span
+                    className={
+                      document.status === "indexed"
+                        ? "doc-status good"
+                        : "doc-status bad"
+                    }
+                  >
+                    {document.status === "indexed" ? "Ready" : "Failed"}
+                  </span>
+                </button>
+              ))}
           </div>
         )}
       </section>
@@ -1071,7 +1269,7 @@ function SettingsView({
           <span className="eyebrow">PREFERENCES</span>
           <h1>Settings</h1>
         </div>
-        {compactLayout && (
+        {compactLayout && !snapshot.connection.viaLauncher && (
           <button
             className="secondary compact-connection-action"
             onClick={() =>
@@ -1111,27 +1309,35 @@ function SettingsView({
             </div>
             <div>
               <strong>
-                {snapshot.connection.connected
-                  ? "Connected to Redrob"
-                  : "Not connected"}
+                {snapshot.connection.viaLauncher
+                  ? "Signed in with Redrob Launcher"
+                  : snapshot.connection.connected
+                    ? "Connected to Redrob"
+                    : "Not connected"}
               </strong>
               <span>
-                {snapshot.connection.connected
-                  ? "The key is verified by Redrob when you send your first question."
-                  : "Local indexing and search work without an account."}
+                {snapshot.connection.error
+                  ? snapshot.connection.error
+                  : snapshot.connection.viaLauncher
+                    ? "This computer's Redrob sign-in is shared by Redrob Launcher. Sign out there to stop using it here."
+                    : snapshot.connection.connected
+                      ? "The key is verified by Redrob when you send your first question."
+                      : "Local indexing and search work without an account."}
               </span>
             </div>
             {!compactLayout &&
+              !snapshot.connection.viaLauncher &&
+              !snapshot.connection.error &&
               (snapshot.connection.connected ? (
                 <button className="secondary" onClick={() => void disconnect()}>
-                  Disconnect
+                  <Icon name="signOut" /> Disconnect
                 </button>
               ) : (
                 <button
                   className="primary"
                   onClick={() => setShowConnect(true)}
                 >
-                  Connect Redrob
+                  <Icon name="signIn" /> Connect Redrob
                 </button>
               ))}
           </div>
@@ -1512,7 +1718,14 @@ function ProgressBar({ progress }: { progress: IndexProgress }) {
         <Loader size="sm" label={progress.message} />
         <div>
           <strong>{progress.message}</strong>
-          <span>{progress.currentFile ?? "Scanning folders"}</span>
+          <span>
+            {progress.currentFile ??
+              (progress.status === "paused"
+                ? `${progress.processed} of ${progress.total} files read`
+                : progress.status === "scanning"
+                  ? "Scanning folders"
+                  : "")}
+          </span>
         </div>
         <b>{percent}%</b>
       </div>
@@ -1522,19 +1735,40 @@ function ProgressBar({ progress }: { progress: IndexProgress }) {
     </div>
   );
 }
-function ToastStack({ toasts }: { toasts: Toast[] }) {
+function ToastStack({
+  toasts,
+  dismiss,
+}: {
+  toasts: Toast[];
+  dismiss: (id: number) => void;
+}) {
   return (
     <div className="toast-stack">
       {toasts.map((toast) => (
-        <div key={toast.id} className={`toast ${toast.tone}`}>
+        <div
+          key={toast.id}
+          className={`toast ${toast.tone}`}
+          role={toast.tone === "error" ? "alert" : "status"}
+        >
           {toast.tone === "success" ? (
             <Icon name="check" />
           ) : toast.tone === "error" ? (
-            <Icon name="close" />
+            // Not `close`: that glyph is now the dismiss button beside it.
+            <Icon name="warning" />
           ) : (
             <Icon name="sparkle" />
           )}
           <span>{toast.message}</span>
+          {toast.tone === "error" && (
+            <button
+              type="button"
+              className="toast-dismiss"
+              aria-label="Dismiss"
+              onClick={() => dismiss(toast.id)}
+            >
+              <Icon name="close" />
+            </button>
+          )}
         </div>
       ))}
     </div>
@@ -1602,7 +1836,8 @@ function BootState() {
       <Logo />
       <h1>Redrob Recall</h1>
       <p>
-        <Loader size="sm" label="Opening your local library" /> Opening your local library…
+        <Loader size="sm" label="Opening your local library" /> Opening your
+        local library…
       </p>
     </main>
   );
@@ -1656,14 +1891,38 @@ const shortenPath = (path: string) => {
 };
 const lastPathPart = (path: string) =>
   path.split(/[\\/]/).filter(Boolean).at(-1) ?? path;
-const relevanceLabel = (score: number) =>
-  score >= 0.99
-    ? "Best match"
-    : score >= 0.8
-      ? "Very relevant"
-      : score >= 0.6
-        ? "Relevant"
-        : "Related";
+const resultSummary = (results: SearchResult[]) => {
+  const exact = results.filter(
+    (result) => matchKind(result) !== "meaning",
+  ).length;
+  const near = results.length - exact;
+  const parts = [];
+  if (exact) parts.push(`${exact} ${exact === 1 ? "match" : "matches"}`);
+  if (near) parts.push(`${near} similar`);
+  if (!parts.length) return "No results";
+  // Say it when nothing contains the words: otherwise a list of neighbours reads as an answer.
+  if (!exact) return `No file contains these words · ${near} similar`;
+  return parts.join(" · ");
+};
+// What a result's label may claim is what was measured: the searched words are in the passage, or in
+// the file's name, or neither and the passage was only near in meaning. A score tier ("Best match",
+// "Very relevant") claimed more than that -- `score` is a rank fused across both halves and divided by
+// the best one in the set, so the first result always read "Best match", even for a word no file
+// contains. Measured on the six-file fixture library: a word found in one file still put all six in the
+// results with vector similarity 0.74-0.84, a nonsense word gave 0.74-0.79, and the true hit was never
+// more than 0.07 above the rest, so no similarity threshold separates them; keyword presence does.
+const matchKind = (result: SearchResult) =>
+  result.keywordScore > 0
+    ? "words"
+    : (result.documentNameScore ?? 0) > 0
+      ? "name"
+      : "meaning";
+const relevanceLabel = (result: SearchResult) =>
+  ({
+    words: "Contains your words",
+    name: "Name matches",
+    meaning: "Similar meaning",
+  })[matchKind(result)];
 const statusLabel = (status: string) =>
   ({
     idle: "Library ready",

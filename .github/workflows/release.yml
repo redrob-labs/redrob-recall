@@ -26,6 +26,7 @@ jobs:
       matrix: ${{ steps.release-matrix.outputs.matrix }}
       platforms: ${{ steps.release-matrix.outputs.platforms }}
       asset_suffixes: ${{ steps.release-matrix.outputs.asset_suffixes }}
+      launcher_tokens: ${{ steps.release-matrix.outputs.launcher_tokens }}
       windows_signing_ready: ${{ steps.release-matrix.outputs.windows_signing_ready }}
     steps:
       - name: Check out source
@@ -329,6 +330,47 @@ jobs:
           updaterJsonPreferNsis: true
           args: --target ${{ matrix.target }} --bundles ${{ matrix.bundles }} --config src-tauri/tauri.release.conf.json
 
+      # The e2e cargo feature lets a WebDriver test choose the library folder through an environment
+      # variable. Prove from the shipped bytes, on every platform, that it is not in this build.
+      - name: Prove the release binary carries no end-to-end test hook
+        shell: bash
+        env:
+          RELEASE_TARGET: ${{ matrix.target }}
+        run: |
+          set -euo pipefail
+          dir="src-tauri/target/${RELEASE_TARGET}/release"
+          bin="$dir/redrob-recall"
+          [ -f "$bin" ] || bin="$dir/redrob-recall.exe"
+          node scripts/check-e2e-feature.mjs "$bin"
+
+      # The default bundler ships the build host's libwayland in the AppImage, and on Mesa 25+ that
+      # makes WebKitWebProcess abort with EGL_BAD_PARAMETER: the window opens and stays blank
+      # (tauri-apps/tauri#15665). Measured on v0.2.0 before this step existed -- strace on the web
+      # process, then the same AppImage with only those four libraries removed rendered with no
+      # environment overrides. Repacking changes the bytes, so the script also re-signs and patches
+      # latest.json; a stale signature still looks signed and breaks every future update.
+      - name: Repack the AppImage without bundled Wayland, and re-sign it
+        if: runner.os == 'Linux'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+          RELEASE_TARGET: ${{ matrix.target }}
+          # Pinned by digest: this binary rewrites a signed release artifact.
+          APPIMAGETOOL_URL: https://github.com/AppImage/appimagetool/releases/download/1.9.0/appimagetool-x86_64.AppImage
+          APPIMAGETOOL_SHA256: 46fdd785094c7f6e545b61afcfb0f3d98d8eab243f644b4b17698c01d06083d1
+        run: |
+          set -euo pipefail
+          tool="$RUNNER_TEMP/appimagetool"
+          curl -fsSL -o "$tool" "$APPIMAGETOOL_URL"
+          echo "${APPIMAGETOOL_SHA256}  ${tool}" | sha256sum -c -
+          chmod +x "$tool"
+          # Runners have no FUSE; both the tool and the AppImage run through their own extractor.
+          export APPIMAGE_EXTRACT_AND_RUN=1
+          bash scripts/resign-linux-appimage.sh \
+            "src-tauri/target/${RELEASE_TARGET}/release/bundle" "${GITHUB_REF_NAME}" "$tool"
+
       - name: Verify Windows installer signatures and timestamps
         if: runner.os == 'Windows'
         shell: pwsh
@@ -366,6 +408,17 @@ jobs:
             Write-Host "$($installer.Name) signed by $($signature.SignerCertificate.Subject) status=$($signature.Status)"
           }
 
+      # Tauri names its files `Redrob Recall_<ver>_<arch>.<ext>`; Redrob Launcher installs only
+      # `redrob-recall-<ver>-<os>-<arch>.<ext>` (see scripts/release-asset-names.mjs). Renaming is a
+      # PATCH on each asset -- same bytes, same id -- so the updater signatures stay valid, and
+      # latest.json is repointed at the new names in the same step. Runs after the AppImage repack,
+      # which must see the bundler's own name.
+      - name: Rename the uploaded assets for Redrob Launcher
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_TARGET: ${{ matrix.target }}
+        run: node scripts/rename-release-assets.mjs "${GITHUB_REPOSITORY}" "${GITHUB_REF_NAME}" "${RELEASE_TARGET}"
 
   # The CDN promotion job that used to live here is gone: GitHub Releases is now the
   # update channel itself, so there is nothing to copy anywhere. What that job also
@@ -426,6 +479,45 @@ jobs:
           # before the corrected manifest can take its name.
           gh api -X DELETE "repos/${GITHUB_REPOSITORY}/releases/assets/${manifest_id}"
           gh release upload "${RELEASE_TAG}" latest.json --repo "${GITHUB_REPOSITORY}"
+
+      # Redrob Launcher reads this one small file from every release to learn that the release uses
+      # its shared sign-in (launcher docs/release-manifest.md). Without it the launcher falls back to
+      # its built-in table and users see "Next release uses this sign-in" forever. Written from the
+      # same module the checker below reads, uploaded while the release is still a draft, then
+      # downloaded back so the check runs against the bytes GitHub actually serves. This repo has no
+      # SHA256SUMS.txt (the updater signs each asset instead), so there is no sums file to list it in.
+      - name: Upload the Redrob Launcher release manifest
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_TAG: ${{ github.ref_name }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          node scripts/write-launcher-manifest.mjs redrob-launcher.json
+          gh release upload "${RELEASE_TAG}" redrob-launcher.json --clobber --repo "${GITHUB_REPOSITORY}"
+          # Re-read the draft so release.json, which the next step checks, lists the new asset.
+          gh api "repos/${GITHUB_REPOSITORY}/releases?per_page=100" > "$RUNNER_TEMP/releases.json"
+          jq --arg tag "${RELEASE_TAG}" 'map(select(.tag_name == $tag)) | first' "$RUNNER_TEMP/releases.json" > release.json
+          manifest_id="$(jq -r '.assets[] | select(.name == "redrob-launcher.json") | .id' release.json)"
+          if [ -z "$manifest_id" ] || [ "$manifest_id" = "null" ]; then
+            echo "::error::redrob-launcher.json did not attach to ${RELEASE_TAG}"
+            exit 1
+          fi
+          gh api -H "Accept: application/octet-stream" \
+            "repos/${GITHUB_REPOSITORY}/releases/assets/${manifest_id}" > "$RUNNER_TEMP/redrob-launcher.json"
+          cmp redrob-launcher.json "$RUNNER_TEMP/redrob-launcher.json"
+
+      # Every file on the release must be one Redrob Launcher can parse, every built leg must
+      # have left an installable one, and redrob-launcher.json must be attached and valid. A
+      # bundler or action upgrade that changes the file names fails here instead of shipping a
+      # release the launcher silently skips.
+      - name: Assert every asset carries a name Redrob Launcher can install
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+          LAUNCHER_TOKENS: ${{ needs.validate.outputs.launcher_tokens }}
+          LAUNCHER_MANIFEST_PATH: ${{ runner.temp }}/redrob-launcher.json
+        shell: bash
+        run: node scripts/check-release-asset-names.mjs release.json "${RELEASE_TAG}" ${LAUNCHER_TOKENS}
 
       - name: Assert the draft release carries a usable updater manifest
         env:
@@ -516,3 +608,50 @@ jobs:
           done
 
           echo "latest.json covers every built platform (${REQUIRED_PLATFORMS}), is signed, and points only at this repository's release assets."
+
+      # "Has a signature" is not "has the right signature". A signature over different bytes passes
+      # the check above and fails on every user's machine at the first update check -- and the
+      # AppImage repack step rewrites bytes after tauri-action signed them, so this is a live risk,
+      # not a theoretical one. Measured before adding this: the published v0.2.0 signature is VALID
+      # for the published AppImage and INVALID for the same file repacked.
+      - name: Verify every updater signature against the bytes it covers
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_TAG: ${{ github.ref_name }}
+          TAURI_UPDATER_PUBLIC_KEY: ${{ vars.TAURI_SIGNING_PUBLIC_KEY }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$TAURI_UPDATER_PUBLIC_KEY"
+          gh api "repos/${GITHUB_REPOSITORY}/releases?per_page=100" > "$RUNNER_TEMP/releases.json"
+          release_json="$(jq --arg tag "${RELEASE_TAG}" 'map(select(.tag_name == $tag)) | first // empty' "$RUNNER_TEMP/releases.json")"
+          manifest_id="$(printf '%s' "$release_json" | jq -r '.assets[] | select(.name == "latest.json") | .id')"
+          gh api -H 'Accept: application/octet-stream' \
+            "repos/${GITHUB_REPOSITORY}/releases/assets/${manifest_id}" > "$RUNNER_TEMP/latest.json"
+
+          dl="$RUNNER_TEMP/updater-assets"
+          mkdir -p "$dl"
+          checked=0
+          # One line per platform entry: "<key> <asset name> <signature>". Signatures are base64,
+          # so they never contain a space.
+          while read -r platform asset signature; do
+            asset_id="$(printf '%s' "$release_json" | jq -r --arg n "$asset" '.assets[] | select(.name == $n) | .id')"
+            if [ -z "$asset_id" ]; then
+              echo "::error::${platform} names ${asset}, which is not attached to ${RELEASE_TAG}"
+              exit 1
+            fi
+            [ -f "$dl/$asset" ] || gh api -H 'Accept: application/octet-stream' \
+              "repos/${GITHUB_REPOSITORY}/releases/assets/${asset_id}" > "$dl/$asset"
+            if ! result="$(node scripts/verify-updater-signature.mjs "$TAURI_UPDATER_PUBLIC_KEY" "$signature" "$dl/$asset")"; then
+              echo "::error::${platform}: ${result} (${asset})"
+              exit 1
+            fi
+            echo "${platform}: ${result} (${asset})"
+            checked=$((checked + 1))
+          done < <(jq -r '.platforms | to_entries[] | "\(.key) \(.value.url | split("/") | last) \(.value.signature)"' "$RUNNER_TEMP/latest.json")
+
+          if [ "$checked" -eq 0 ]; then
+            echo "::error::latest.json has no platform entries; nothing was verified"
+            exit 1
+          fi
+          echo "Every one of ${checked} updater signatures verifies against the bytes it names."

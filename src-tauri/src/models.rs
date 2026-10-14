@@ -16,7 +16,6 @@ pub struct AppSettings {
     pub send_context_to_redrob: bool,
     pub local_api_enabled: bool,
     pub local_api_port: u16,
-    pub redrob_base_url: String,
 }
 
 impl AppSettings {
@@ -55,16 +54,6 @@ impl AppSettings {
             }),
             "supported file types contain an invalid extension"
         );
-        let endpoint = url::Url::parse(self.redrob_base_url.trim())
-            .map_err(|_| anyhow::anyhow!("Redrob API URL is invalid"))?;
-        let local_http = endpoint.scheme() == "http"
-            && endpoint
-                .host_str()
-                .is_some_and(|host| matches!(host, "localhost" | "127.0.0.1" | "::1"));
-        anyhow::ensure!(
-            endpoint.scheme() == "https" || local_http,
-            "Redrob API URL must use HTTPS (HTTP is allowed only for localhost)"
-        );
         Ok(())
     }
 }
@@ -94,7 +83,6 @@ impl Default for AppSettings {
             send_context_to_redrob: true,
             local_api_enabled: true,
             local_api_port: 47331,
-            redrob_base_url: "https://console.redrob.ai/api/backend/v1".into(),
         }
     }
 }
@@ -123,13 +111,35 @@ pub enum IndexStatus {
     Error,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+/// Whether the shared Redrob Code daemon is signed in to the Redrob console. The daemon holds
+/// the key; this app only reads whether it has one and whose it is.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct ConnectionStatus {
     pub connected: bool,
+    /// Whose key the daemon uses: "Redrob Launcher" or "Redrob Code".
     pub key_label: Option<String>,
+    /// The key in use is Redrob Launcher's shared sign-in, which the engine reads itself:
+    /// signing out happens in the launcher, so the UI shows no Disconnect for it.
+    pub via_launcher: bool,
+    /// The daemon's address, empty when none answers.
     pub endpoint: String,
+    /// Why there is no engine to ask: the install sentence with the launcher link, or the start
+    /// failure's reason. `None` while the engine answers.
     pub error: Option<String>,
+}
+
+impl ConnectionStatus {
+    /// Before the daemon has been asked.
+    pub fn unknown() -> Self {
+        Self {
+            connected: false,
+            key_label: None,
+            via_launcher: false,
+            endpoint: String::new(),
+            error: None,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -140,6 +150,19 @@ pub struct AppSnapshot {
     pub connection: ConnectionStatus,
     pub data_directory: String,
     pub app_version: String,
+    /// One entry per library folder, in settings order.
+    pub folders: Vec<FolderStatus>,
+}
+
+/// What one library folder holds. `present` is false when the folder is gone or not a directory:
+/// the watcher skips such a folder, so the screen must not call it watched.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct FolderStatus {
+    pub path: String,
+    pub present: bool,
+    pub files: u64,
+    pub failed: u64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -287,20 +310,14 @@ mod tests {
     }
 
     #[test]
-    fn unsafe_remote_http_endpoint_is_rejected() {
-        let settings = AppSettings {
-            redrob_base_url: "http://example.com/v1".into(),
-            ..AppSettings::default()
-        };
-        assert!(settings.validate().is_err());
-    }
-
-    #[test]
-    fn localhost_http_endpoint_is_allowed_for_development() {
-        let settings = AppSettings {
-            redrob_base_url: "http://127.0.0.1:8080/v1".into(),
-            ..AppSettings::default()
-        };
+    fn settings_saved_with_the_old_console_url_still_load() {
+        // Earlier versions stored the console base URL in settings. The engine owns that address
+        // now, so the field is ignored rather than refused.
+        let settings: AppSettings = serde_json::from_str(
+            r#"{"answerModel":"auto","redrobBaseUrl":"https://console.redrob.ai/api/backend/v1"}"#,
+        )
+        .unwrap();
+        assert_eq!(settings.answer_model, "auto");
         settings.validate().unwrap();
     }
 }

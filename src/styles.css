@@ -33,10 +33,13 @@
   --brand-dark: var(--action-primary-hover);
   --brand-soft: var(--surface-brand-subtle);
   --green: var(--status-success);
-  --green-soft: color-mix(in oklab, var(--status-success) 16%, var(--surface-raised));
+  --green-soft: color-mix(
+    in oklab,
+    var(--status-success) 16%,
+    var(--surface-raised)
+  );
   --amber: var(--status-warning);
 }
-
 
 * {
   box-sizing: border-box;
@@ -204,7 +207,8 @@ strong,
   height: 7px;
   border-radius: 50%;
   background: var(--status-success);
-  box-shadow: 0 0 0 3px color-mix(in oklab, var(--status-success) 18%, transparent);
+  box-shadow: 0 0 0 3px
+    color-mix(in oklab, var(--status-success) 18%, transparent);
 }
 .pulse-dot {
   background: var(--status-info);
@@ -581,7 +585,9 @@ strong,
 }
 .search-box:focus-within {
   border-color: var(--focus-ring);
-  box-shadow: var(--shadow-md), 0 0 0 var(--focus-ring-width) var(--focus-ring);
+  box-shadow:
+    var(--shadow-md),
+    0 0 0 var(--focus-ring-width) var(--focus-ring);
 }
 .search-box > svg {
   flex: none;
@@ -1030,7 +1036,9 @@ kbd {
 }
 .ask-composer:focus-within {
   border-color: var(--focus-ring);
-  box-shadow: var(--shadow-md), 0 0 0 var(--focus-ring-width) var(--focus-ring);
+  box-shadow:
+    var(--shadow-md),
+    0 0 0 var(--focus-ring-width) var(--focus-ring);
 }
 .ask-composer textarea {
   display: block;
@@ -1354,6 +1362,21 @@ kbd {
   color: var(--green);
   font-size: 9px;
   font-weight: 700;
+}
+.watching[data-state="paused"] {
+  color: var(--status-warning);
+}
+.watching[data-state="missing"] {
+  color: var(--status-danger);
+}
+.watching[data-state="paused"] .status-dot,
+.watching[data-state="missing"] .status-dot {
+  background: currentColor;
+}
+.folder-count {
+  display: block;
+  color: var(--muted);
+  font-size: 11px;
 }
 .document-table {
   overflow: hidden;
@@ -2071,4 +2094,94 @@ kbd {
     right: 24px;
     display: inline-flex;
   }
+}
+
+/* Browser-preview marker. Fixed so it sits above every screen without changing their layout. */
+.demo-banner {
+  position: fixed;
+  top: 8px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 1000;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 4px 10px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 999px;
+  background: var(--surface-raised);
+  color: var(--ink-secondary);
+  box-shadow: var(--shadow-sm);
+  font-size: 11px;
+  white-space: nowrap;
+  pointer-events: none;
+}
+.demo-banner span {
+  padding: 1px 6px;
+  border-radius: 4px;
+  background: var(--action-primary);
+  color: var(--ink-on-brand);
+  font-size: 9px;
+  font-weight: 800;
+  letter-spacing: 0.09em;
+}
+
+/* The stack ignores the pointer so it never blocks the page; a dismiss button has to opt back in. */
+.toast-dismiss {
+  pointer-events: auto;
+  display: inline-flex;
+  margin-left: auto;
+  padding: 2px;
+  border: 0;
+  border-radius: 4px;
+  color: var(--ink-muted);
+  background: transparent;
+  cursor: pointer;
+}
+.toast-dismiss:hover,
+.toast-dismiss:focus-visible {
+  color: var(--ink-primary);
+  background: var(--surface-sunken);
+}
+.toast span {
+  overflow-wrap: anywhere;
+}
+
+.doc-error {
+  color: var(--brand-dark);
+  overflow-wrap: anywhere;
+}
+
+.section-actions {
+  display: flex;
+  gap: 8px;
+}
+
+/* A near-in-meaning result is shown, but it does not claim to contain what was searched. */
+.result-title [data-match="meaning"],
+.match-meter [data-match="meaning"] {
+  color: var(--ink-muted);
+}
+
+/* A word of the search, marked where it appears. A highlighter: the yellow tint with the family's own
+   deep ink, the same in both themes, because neither theme's text colour reads on it and a quiet brand
+   tint measured 238,244,255 on a 248,249,251 card -- present and invisible. */
+.result-card mark,
+.preview-panel mark,
+blockquote mark {
+  background: var(--accent-yellow-2);
+  color: var(--accent-yellow-5);
+  border-radius: 2px;
+}
+
+/* A result whose folder is gone: still searchable, not openable. */
+.folder-gone {
+  color: var(--status-danger);
+}
+
+/* Disabled secondary and icon buttons read as unavailable, like a disabled primary. */
+.secondary:disabled,
+.icon-button:disabled {
+  opacity: 0.52;
+  cursor: not-allowed;
 }

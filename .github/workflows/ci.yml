@@ -42,6 +42,14 @@ jobs:
       - name: Install locked JavaScript dependencies
         run: npm ci
 
+      # The indexer tests embed real files with the real model, which fastembed downloads on first
+      # use (465 MB). Keyed on the source that names the model, so changing the model refetches it.
+      - name: Cache the embedding model used by the indexer tests
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: src-tauri/target/test-model-cache
+          key: embedding-model-${{ hashFiles('src-tauri/src/embedding.rs') }}
+
       - name: Run complete verification
         run: npm run verify
 

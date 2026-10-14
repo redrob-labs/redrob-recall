@@ -1,6 +1,6 @@
 [package]
 name = "redrob-recall"
-version = "0.2.0"
+version = "0.3.0"
 description = "Private, local-first semantic search for everything on your computer"
 authors = ["Janghoon Lee (Redrob) and contributors"]
 edition = "2021"
@@ -33,6 +33,10 @@ parking_lot = "0.12.5"
 pdf-extract = "0.12.0"
 qdrant-edge = "=0.8.0"
 quick-xml = "0.42.0"
+# The shared Redrob Code daemon, from redrob-code's own crate (docs/LOCAL-ENGINE-API.md section 3):
+# finds or starts the one engine on this machine and hands back its record. Ask talks to that
+# daemon only; the daemon holds the Redrob console key.
+redrob-engine-client = { git = "https://github.com/redrob-labs/redrob-code", tag = "v0.6.3" }
 reqwest = { version = "0.12.24", default-features = false, features = ["json", "rustls-tls", "stream"] }
 rusqlite = { version = "0.37.0", features = ["bundled", "chrono"] }
 serde = { version = "1.0.228", features = ["derive"] }
@@ -49,7 +53,6 @@ tokio = { version = "1.48.0", features = ["macros", "rt-multi-thread", "sync", "
 tower-http = { version = "0.6.6", features = ["cors", "trace"] }
 tracing = "0.1.41"
 tracing-subscriber = { version = "0.3.20", features = ["env-filter"] }
-url = "2.5.7"
 uuid = { version = "1.18.1", features = ["v4", "serde"] }
 walkdir = "2.5.0"
 zip = { version = "6.0.0", default-features = false, features = ["deflate"] }
@@ -60,3 +63,10 @@ lto = "thin"
 opt-level = "s"
 panic = "abort"
 strip = true
+
+[features]
+# End-to-end tests only. The native folder picker cannot be driven over WebDriver, so with this
+# feature `choose_library_folder` answers with $REDROB_E2E_FOLDER. Off by default: release builds
+# never pass it, and scripts/check-e2e-feature.mjs fails the release if one ever does.
+e2e = []
+

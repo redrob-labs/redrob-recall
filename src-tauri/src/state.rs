@@ -1,5 +1,6 @@
 use crate::{
     embedding::LocalEmbedder,
+    engine::{Engine, EngineError},
     indexer, local_api,
     models::{AppSettings, AppSnapshot, ConnectionStatus, IndexStatus},
     storage::Storage,
@@ -20,14 +21,22 @@ use tauri::{AppHandle, Emitter};
 use crate::models::{EMBEDDING_DIMENSION, VECTOR_NAME};
 
 struct Inner {
-    pub app_handle: AppHandle,
+    /// `None` only in tests, which run the real indexer without a window to emit to.
+    pub app_handle: Option<AppHandle>,
     pub data_dir: PathBuf,
     pub storage: Storage,
     pub shard: Mutex<Option<EdgeShard>>,
     pub embedder: LocalEmbedder,
     pub settings: RwLock<AppSettings>,
-    pub api_key: RwLock<Option<String>>,
+    /// The shared Redrob Code daemon, which holds the Redrob console key. This app has none.
+    pub engine: Engine,
+    /// What the daemon last said about its sign-in. Snapshots are emitted far too often to ask
+    /// the daemon each time, so `refresh_connection` asks and everything else reads this.
+    pub connection: RwLock<ConnectionStatus>,
     pub indexing: AtomicBool,
+    /// Set when an index was asked for while one was already running, so the running pass runs
+    /// once more when it finishes instead of the request being dropped.
+    pub rescan_requested: AtomicBool,
     pub paused: AtomicBool,
     pub shutting_down: AtomicBool,
     pub current_file: RwLock<Option<String>>,
@@ -41,6 +50,25 @@ impl AppState {
     pub fn initialize(app_handle: AppHandle) -> Result<Self> {
         let base_dirs = BaseDirs::new().context("home directory is unavailable")?;
         let data_dir = base_dirs.home_dir().join(".redrob").join("recall");
+        Self::open(Some(app_handle), data_dir, Engine::new())
+    }
+
+    /// The real state, rooted somewhere other than the user's library and with nothing to emit to.
+    /// Test-only: the indexer integration tests drive the same code the app does, without touching
+    /// `~/.redrob/recall` or the OS keyring.
+    #[cfg(test)]
+    pub(crate) fn open_headless(data_dir: PathBuf) -> Result<Self> {
+        Self::open(None, data_dir, Engine::new())
+    }
+
+    /// `open_headless` against a given engine, for the sign-in tests: a fake daemon, never the
+    /// real one on this machine.
+    #[cfg(test)]
+    pub(crate) fn open_headless_with_engine(data_dir: PathBuf, engine: Engine) -> Result<Self> {
+        Self::open(None, data_dir, engine)
+    }
+
+    fn open(app_handle: Option<AppHandle>, data_dir: PathBuf, engine: Engine) -> Result<Self> {
         std::fs::create_dir_all(&data_dir)?;
         #[cfg(unix)]
         {
@@ -65,7 +93,6 @@ impl AppState {
             storage.mark_all_vectors_pending()?;
         }
         let embedder = LocalEmbedder::new(&data_dir.join("models"));
-        let api_key = load_api_key().ok();
 
         Ok(Self(Arc::new(Inner {
             app_handle,
@@ -74,8 +101,10 @@ impl AppState {
             shard: Mutex::new(Some(shard)),
             embedder,
             settings: RwLock::new(settings),
-            api_key: RwLock::new(api_key),
+            engine,
+            connection: RwLock::new(ConnectionStatus::unknown()),
             indexing: AtomicBool::new(false),
+            rescan_requested: AtomicBool::new(false),
             paused: AtomicBool::new(false),
             shutting_down: AtomicBool::new(false),
             current_file: RwLock::new(None),
@@ -84,6 +113,11 @@ impl AppState {
     }
 
     pub fn start_background_services(&self) {
+        let state = self.clone();
+        tauri::async_runtime::spawn(async move {
+            state.migrate_legacy_key().await;
+            state.refresh_connection().await;
+        });
         if let Err(error) = indexer::configure_watcher(self) {
             tracing::warn!(%error, "file watcher could not start");
         }
@@ -117,8 +151,11 @@ impl AppState {
         } else {
             IndexStatus::Idle
         };
+        let settings = self.settings();
+        let folders = self.0.storage.folder_stats(&settings.library_paths)?;
         Ok(AppSnapshot {
-            settings: self.settings(),
+            folders,
+            settings,
             stats: self
                 .0
                 .storage
@@ -146,45 +183,95 @@ impl AppState {
         Ok(())
     }
 
+    /// What the daemon last said about its sign-in. `refresh_connection` is what asks it.
     pub fn connection_status(&self) -> ConnectionStatus {
-        let settings = self.settings();
-        ConnectionStatus {
-            connected: self.0.api_key.read().is_some(),
-            key_label: self
-                .0
-                .api_key
-                .read()
-                .as_ref()
-                .map(|_| "This device".to_string()),
-            endpoint: settings.redrob_base_url,
-            error: None,
-        }
+        self.0.connection.read().clone()
     }
 
-    pub fn set_api_key(&self, api_key: String) -> Result<()> {
+    pub fn engine(&self) -> &Engine {
+        &self.0.engine
+    }
+
+    /// Asks the daemon whether it is signed in to the Redrob console and remembers the answer.
+    /// Finds or starts the daemon on the way, so a missing engine is reported here first.
+    pub async fn refresh_connection(&self) -> ConnectionStatus {
+        let status = match self.0.engine.account_status().await {
+            Ok(account) => ConnectionStatus {
+                connected: account.connected,
+                key_label: account.connected.then(|| {
+                    if account.is_from_launcher() {
+                        "Redrob Launcher".to_string()
+                    } else {
+                        "Redrob Code".to_string()
+                    }
+                }),
+                via_launcher: account.is_from_launcher(),
+                endpoint: self
+                    .0
+                    .engine
+                    .connect()
+                    .await
+                    .map(|record| record.url)
+                    .unwrap_or_default(),
+                error: None,
+            },
+            Err(error) => {
+                tracing::warn!(%error, "the Redrob Code engine is unavailable");
+                ConnectionStatus {
+                    connected: false,
+                    key_label: None,
+                    via_launcher: false,
+                    endpoint: String::new(),
+                    error: Some(error.to_string()),
+                }
+            }
+        };
+        *self.0.connection.write() = status.clone();
+        self.emit_snapshot();
+        status
+    }
+
+    /// Hands a console key to the daemon, which keeps it. Nothing of this app's stores it.
+    pub async fn sign_in(&self, api_key: String) -> Result<ConnectionStatus, String> {
         let trimmed = api_key.trim();
-        anyhow::ensure!(!trimmed.is_empty(), "API key cannot be empty");
-        anyhow::ensure!(trimmed.len() >= 16, "that API key is too short");
-        let entry = keyring::Entry::new("ai.redrob.recall", "redrob-api-key")
-            .context("the operating system credential store is unavailable")?;
-        entry
-            .set_password(trimmed)
-            .context("the API key could not be saved in the operating system credential store")?;
-        *self.0.api_key.write() = Some(trimmed.to_string());
-        self.emit_snapshot();
-        Ok(())
-    }
-
-    pub fn disconnect(&self) {
-        *self.0.api_key.write() = None;
-        if let Ok(entry) = keyring::Entry::new("ai.redrob.recall", "redrob-api-key") {
-            let _ = entry.delete_credential();
+        if trimmed.is_empty() {
+            return Err("API key cannot be empty".into());
         }
-        self.emit_snapshot();
+        if trimmed.len() < 16 {
+            return Err("that API key is too short".into());
+        }
+        self.0
+            .engine
+            .sign_in(trimmed)
+            .await
+            .map_err(|error| error.to_string())?;
+        Ok(self.refresh_connection().await)
     }
 
-    pub fn api_key(&self) -> Option<String> {
-        self.0.api_key.read().clone()
+    /// Removes the key from the daemon. Redrob Launcher's shared sign-in is the engine's to keep
+    /// reading; signing out of that happens in the launcher, and the UI offers no button for it.
+    pub async fn sign_out(&self) -> Result<ConnectionStatus, String> {
+        self.0
+            .engine
+            .sign_out()
+            .await
+            .map_err(|error| error.to_string())?;
+        Ok(self.refresh_connection().await)
+    }
+
+    /// An earlier version of this app kept the console key in the OS credential store. The engine
+    /// holds it now: hand a key found there over once, then delete it. A key that cannot be handed
+    /// over yet (no engine) stays for the next run.
+    async fn migrate_legacy_key(&self) {
+        let Some(key) = legacy_key() else { return };
+        match self.0.engine.sign_in(&key).await {
+            Ok(()) => {
+                forget_legacy_key();
+                tracing::info!("the stored Redrob key was handed to the Redrob Code engine");
+            }
+            Err(EngineError::Unavailable(_)) => {}
+            Err(error) => tracing::warn!(%error, "the stored Redrob key could not be handed over"),
+        }
     }
 
     pub fn data_dir(&self) -> &Path {
@@ -217,6 +304,15 @@ impl AppState {
         }
     }
 
+    pub fn request_rescan(&self) {
+        self.0.rescan_requested.store(true, Ordering::SeqCst);
+    }
+
+    /// Consume a pending rescan request.
+    pub fn take_rescan_request(&self) -> bool {
+        self.0.rescan_requested.swap(false, Ordering::SeqCst)
+    }
+
     pub fn is_indexing(&self) -> bool {
         self.0.indexing.load(Ordering::SeqCst)
     }
@@ -242,13 +338,16 @@ impl AppState {
         *self.0.watcher.lock() = Some(watcher);
     }
 
-    pub fn app_handle(&self) -> &AppHandle {
-        &self.0.app_handle
+    /// Emit to the window, if there is one. Emission is best-effort everywhere it is used.
+    pub fn emit<S: serde::Serialize + Clone>(&self, event: &str, payload: S) {
+        if let Some(app_handle) = &self.0.app_handle {
+            let _ = app_handle.emit(event, payload);
+        }
     }
 
     pub fn emit_snapshot(&self) {
         if let Ok(snapshot) = self.snapshot() {
-            let _ = self.0.app_handle.emit("snapshot-changed", snapshot);
+            self.emit("snapshot-changed", snapshot);
         }
     }
 
@@ -329,9 +428,125 @@ fn open_shard(path: &Path) -> Result<(EdgeShard, bool)> {
     Ok((shard, true))
 }
 
-fn load_api_key() -> Result<String> {
-    let entry = keyring::Entry::new("ai.redrob.recall", "redrob-api-key")?;
+const LEGACY_KEYRING_SERVICE: &str = "ai.redrob.recall";
+const LEGACY_KEYRING_USER: &str = "redrob-api-key";
+
+/// The key an earlier version stored in the OS credential store, if any. Migration only.
+fn legacy_key() -> Option<String> {
+    let entry = keyring::Entry::new(LEGACY_KEYRING_SERVICE, LEGACY_KEYRING_USER).ok()?;
     entry
         .get_password()
-        .context("no Redrob API key in the OS keyring")
+        .ok()
+        .map(|key| key.trim().to_string())
+        .filter(|key| !key.is_empty())
+}
+
+fn forget_legacy_key() {
+    if let Ok(entry) = keyring::Entry::new(LEGACY_KEYRING_SERVICE, LEGACY_KEYRING_USER) {
+        let _ = entry.delete_credential();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::AppState;
+    use crate::engine::tests::FakeDaemon;
+    use crate::engine::Engine;
+    use redrob_engine_client::Unavailable;
+    use std::sync::{Arc, Mutex};
+
+    fn scratch(label: &str) -> std::path::PathBuf {
+        let dir =
+            std::env::temp_dir().join(format!("redrob-recall-{label}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    #[tokio::test]
+    async fn the_connection_reads_the_daemon_sign_in_and_hands_keys_to_it() {
+        let dir = scratch("engine-connection");
+        // The daemon's provider list, as the test moves it along: signed out, then signed in
+        // with the launcher's key, then with a key an app handed over.
+        let providers = Arc::new(Mutex::new(r#"{"all":[]}"#.to_string()));
+        let answers = providers.clone();
+        let daemon = FakeDaemon::start("s", move |seen, _| {
+            match (seen.method.as_str(), seen.path.as_str()) {
+                ("GET", "/provider") => (200, answers.lock().unwrap().clone()),
+                ("PUT", "/auth/redrob") => {
+                    *answers.lock().unwrap() =
+                        r#"{"all":[{"id":"redrob","source":"api","key":"set"}]}"#.into();
+                    (200, "true".into())
+                }
+                ("DELETE", "/auth/redrob") => {
+                    *answers.lock().unwrap() = r#"{"all":[]}"#.into();
+                    (200, "true".into())
+                }
+                _ => (404, "{}".into()),
+            }
+        });
+        let state =
+            AppState::open_headless_with_engine(dir.join("data"), daemon.engine("s")).unwrap();
+
+        // Before anyone asked, nothing is claimed.
+        let status = state.connection_status();
+        assert!(!status.connected && status.error.is_none());
+
+        // Signed out: not connected, and the engine's address is known.
+        let status = state.refresh_connection().await;
+        assert!(!status.connected && !status.via_launcher && status.key_label.is_none());
+        assert_eq!(status.endpoint, daemon.url);
+        assert_eq!(status.error, None);
+
+        // Signed in through Redrob Launcher: the engine reads that itself and says so.
+        *providers.lock().unwrap() = r#"{"all":[{"id":"redrob","source":"launcher"}]}"#.into();
+        let status = state.refresh_connection().await;
+        assert!(status.connected && status.via_launcher);
+        assert_eq!(status.key_label.as_deref(), Some("Redrob Launcher"));
+        assert!(state.connection_status().connected, "remembered");
+
+        // A pasted key goes to the engine, is too short to send when too short, and signing out
+        // takes it back from the engine.
+        assert!(state.sign_in("short".into()).await.is_err());
+        let status = state.sign_in(" rk_0123456789abcdef ".into()).await.unwrap();
+        assert!(status.connected && !status.via_launcher);
+        assert_eq!(status.key_label.as_deref(), Some("Redrob Code"));
+        let put = daemon
+            .seen
+            .lock()
+            .unwrap()
+            .iter()
+            .find(|s| s.method == "PUT")
+            .cloned()
+            .unwrap();
+        assert!(
+            put.body.contains(r#""key":"rk_0123456789abcdef""#),
+            "trimmed"
+        );
+        let status = state.sign_out().await.unwrap();
+        assert!(!status.connected);
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[tokio::test]
+    async fn a_missing_engine_is_reported_on_the_connection_and_blocks_sign_in() {
+        let dir = scratch("engine-missing-connection");
+        let engine = Engine::with_resolver(Arc::new(|| Err(Unavailable::NotInstalled)));
+        let state = AppState::open_headless_with_engine(dir.join("data"), engine).unwrap();
+        let status = state.refresh_connection().await;
+        assert!(!status.connected);
+        assert_eq!(
+            status.error.as_deref(),
+            Some("Redrob Code is not installed. Install it with Redrob Launcher. https://github.com/redrob-labs/redrob-launcher/releases/latest")
+        );
+        assert_eq!(
+            state
+                .sign_in("rk_0123456789abcdef".into())
+                .await
+                .unwrap_err(),
+            status.error.unwrap()
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 }

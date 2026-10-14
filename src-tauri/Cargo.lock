@@ -5104,9 +5104,9 @@ dependencies = [
 
 [[package]]
 name = "quinn-proto"
-version = "0.11.17"
+version = "0.11.19"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "04759210543be93709136e28212294a659ef5001836ff4eab4d663e4529bba83"
+checksum = "0e750cca55fe4f0439a15d0bb529da9651e79993e8e72c61a899a36d462befbe"
 dependencies = [
  "bytes",
  "getrandom 0.4.3",
@@ -5360,8 +5360,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "redrob-engine-client"
+version = "0.1.0"
+source = "git+https://github.com/redrob-labs/redrob-code?tag=v0.6.3#ef3e511afb1107fd0066fa95cb29256b7d020d3c"
+dependencies = [
+ "base64 0.22.1",
+ "dirs",
+ "log",
+ "serde",
+ "serde_json",
+ "ureq",
+]
+
+[[package]]
 name = "redrob-recall"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "anyhow",
  "axum",
@@ -5378,6 +5391,7 @@ dependencies = [
  "pdf-extract",
  "qdrant-edge",
  "quick-xml",
+ "redrob-engine-client",
  "reqwest 0.12.28",
  "rusqlite",
  "serde",
@@ -5395,7 +5409,6 @@ dependencies = [
  "tower-http",
  "tracing",
  "tracing-subscriber",
- "url",
  "uuid",
  "walkdir",
  "zip 6.0.0",

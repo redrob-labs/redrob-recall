@@ -18,6 +18,10 @@ CASES = [
     ("src/styles.css", lambda t: t + '\n.guard-probe { font-family: "Comic Sans MS"; }\n',
      "off-system typeface"),
     ("src/assets/brand/redrob-symbol.png", None, "edited brand artwork"),
+    ("src/App.tsx", lambda t: t.replace('<Icon name="signOut" /> Disconnect', "Disconnect", 1),
+     "icon removed from a labelled button"),
+    ("src/App.tsx", lambda t: t.replace("<Icon name=\"signIn\" /> Connect Redrob", "&times; Connect Redrob", 1),
+     "letter standing in for an icon"),
 ]
 
 failed = []
@@ -47,4 +51,4 @@ if failed:
     for f in failed:
         print("  " + f)
     sys.exit(1)
-print("\nall four checks fail on their defect, and the tree restored clean")
+print("\nevery check fails on its defect, and the tree restored clean")

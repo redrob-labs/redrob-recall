@@ -13,6 +13,10 @@ import type {
   SearchRequest,
   SearchResult,
 } from "../types";
+import packageJson from "../../package.json";
+
+/** Shown instead of a real path in the browser demo, where no folder can be read. */
+export const DEMO_FOLDER = "Sample folder (browser demo, not on disk)";
 
 const isDesktop =
   typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
@@ -41,7 +45,6 @@ const defaultSettings: AppSettings = {
   sendContextToRedrob: true,
   localApiEnabled: true,
   localApiPort: 47331,
-  redrobBaseUrl: "https://console.redrob.ai/api/backend/v1",
 };
 
 const demoEnabled =
@@ -116,10 +119,18 @@ function mockSnapshot(): AppSnapshot {
     connection: {
       connected: mockConnected,
       keyLabel: mockConnected ? "This device" : undefined,
-      endpoint: defaultSettings.redrobBaseUrl,
+      viaLauncher: false,
+      endpoint: "http://127.0.0.1:4096",
     },
     dataDirectory: "~/.redrob/recall",
-    appVersion: "0.1.0",
+    // Read from the manifest the release bumps, so the demo cannot drift from the shipped version.
+    appVersion: packageJson.version,
+    folders: mockSettings.libraryPaths.map((path) => ({
+      path,
+      present: true,
+      files: demoEnabled ? 12481 : 0,
+      failed: demoEnabled ? 3 : 0,
+    })),
   };
 }
 
@@ -130,15 +141,18 @@ export const bridge = {
   },
   async chooseFolder(): Promise<string | null> {
     if (isDesktop) return invoke("choose_library_folder");
-    return "/Users/you/Documents";
+    // The browser has no folder picker and no filesystem. Return a name that cannot be mistaken
+    // for a real folder, so nothing downstream looks like it indexed the user's files.
+    return DEMO_FOLDER;
   },
   async addLibraryPath(path: string): Promise<void> {
     if (isDesktop) return invoke("add_library_path", { path });
-    if (!mockSettings.libraryPaths.includes(path))
-      mockSettings = {
-        ...mockSettings,
-        libraryPaths: [...mockSettings.libraryPaths, path],
-      };
+    if (mockSettings.libraryPaths.includes(path))
+      throw new Error(`${path} is already in your library`);
+    mockSettings = {
+      ...mockSettings,
+      libraryPaths: [...mockSettings.libraryPaths, path],
+    };
   },
   async removeLibraryPath(path: string): Promise<void> {
     if (isDesktop) return invoke("remove_library_path", { path });
@@ -188,17 +202,33 @@ export const bridge = {
   async documents(): Promise<DocumentRecord[]> {
     if (isDesktop) return invoke("get_documents", { limit: 250, offset: 0 });
     if (!demoEnabled) return [];
-    return demoResults.map((result) => ({
-      id: result.documentId,
-      path: result.path,
-      name: result.name,
-      extension: result.extension,
-      mimeType: "text/plain",
-      modifiedAt: result.modifiedAt,
-      sizeBytes: 1_420_000,
-      status: "indexed",
-      chunkCount: 18,
-    }));
+    return demoResults
+      .map(
+        (result): DocumentRecord => ({
+          id: result.documentId,
+          path: result.path,
+          name: result.name,
+          extension: result.extension,
+          mimeType: "text/plain",
+          modifiedAt: result.modifiedAt,
+          sizeBytes: 1_420_000,
+          status: "indexed",
+          chunkCount: 18,
+        }),
+      )
+      .concat({
+        // One failure, so the demo shows what a failed file looks like and why it failed.
+        id: 9_001,
+        path: "/demo/Scans/receipt-photo.pdf",
+        name: "receipt-photo.pdf",
+        extension: "pdf",
+        mimeType: "application/pdf",
+        modifiedAt: "2026-09-01T10:00:00Z",
+        sizeBytes: 2_310_000,
+        status: "failed",
+        chunkCount: 0,
+        lastError: "no readable text was found",
+      });
   },
   async openSource(path: string): Promise<void> {
     if (isDesktop) return invoke("open_source", { path });
@@ -216,13 +246,18 @@ export const bridge = {
     return {
       connected: true,
       keyLabel: "This device",
-      endpoint: defaultSettings.redrobBaseUrl,
+      viaLauncher: false,
+      endpoint: "http://127.0.0.1:4096",
     };
   },
   async disconnect(): Promise<ConnectionStatus> {
     if (isDesktop) return invoke("disconnect_redrob");
     mockConnected = false;
-    return { connected: false, endpoint: defaultSettings.redrobBaseUrl };
+    return {
+      connected: false,
+      viaLauncher: false,
+      endpoint: "http://127.0.0.1:4096",
+    };
   },
   async openExternal(url: string): Promise<void> {
     if (isDesktop) return openUrl(url);
