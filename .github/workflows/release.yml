@@ -112,10 +112,12 @@ jobs:
 
       - name: Install Linux desktop dependencies
         if: runner.os == 'Linux'
+        # desktop-file-utils: the AppImage repack step below runs appimagetool, which refuses to
+        # pack without `desktop-file-validate` on PATH (measured on the v0.3.0 Linux leg).
         run: >-
           sudo apt-get update && sudo apt-get install -y
           libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev
-          patchelf libssl-dev
+          patchelf libssl-dev desktop-file-utils
 
       - name: Set up Node.js
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
