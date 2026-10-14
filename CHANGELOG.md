@@ -2,6 +2,12 @@
 
 All notable changes to Redrob Recall are documented here.
 
+## [0.3.1] - 2026-10-14
+
+### Fixed
+
+- The Linux release leg repacks the AppImage with appimagetool, which refuses to run without `desktop-file-validate`; the runner did not have it, so the v0.3.0 Linux build failed. The workflow now installs `desktop-file-utils`. No application change.
+
 ## [0.3.0] - 2026-10-14
 
 ### Changed
