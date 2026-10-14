@@ -97,11 +97,15 @@ Tauri는 플랫폼별 번들을 `src-tauri/target/release/bundle/`에 씁니다.
 
 ## Redrob 연결
 
+Ask는 이 컴퓨터의 공용 **Redrob Code** 엔진을 거칩니다. 엔진이 모든 Redrob 앱의 콘솔 키를 갖습니다. [Redrob Launcher](https://github.com/redrob-labs/redrob-launcher/releases/latest)로 설치하세요. 엔진이 없으면 연결 패널이 그렇게 알리고 Ask는 쓸 수 없습니다(로컬 색인과 검색은 그대로 동작합니다).
+
+이 컴퓨터가 이미 Redrob Launcher로 로그인되어 있으면 아무것도 붙여 넣을 필요가 없습니다. 엔진이 그 로그인을 읽고 패널에 **Redrob Launcher로 로그인됨**이 표시됩니다. 그렇지 않으면:
+
 1. `https://console.redrob.ai/api-keys`에서 워크스페이스 API 키를 만들거나 고릅니다.
 2. **Ask** 또는 **설정 → Redrob 연결**을 엽니다.
-3. 키를 붙여 넣습니다. 앱은 운영체제 자격 증명 관리자에 저장합니다.
+3. 키를 붙여 넣습니다. 앱은 키를 엔진에 넘기고(`PUT /auth/redrob`) 자기 복사본을 두지 않습니다.
 
-이 컴퓨터가 이미 **Redrob Launcher**로 로그인되어 있으면 키를 붙여 넣을 필요가 없습니다. 앱이 런처의 공유 계정 파일(Linux `~/.config/redrob-shared/account.json`, macOS `~/Library/Application Support/ai.redrob.shared/account.json`, Windows `%APPDATA%\Redrob\Shared\account.json`, 디렉터리는 `REDROB_SHARED_DIR`로 바꿀 수 있음)을 읽고 **Redrob Launcher로 로그인됨**을 표시합니다. 이 앱은 그 파일을 쓰지 않고, 여기에 붙여 넣은 키가 항상 우선하며, 로그아웃은 런처에서 합니다.
+런처 공유 로그인의 로그아웃은 런처에서 합니다. 이전 버전이 저장한 키는 한 번 엔진에 넘기고 자격 증명 관리자에서 지웁니다.
 
 로컬 색인과 검색에는 Redrob이 필요하지 않습니다. Ask는 제공한 키에 연결된 워크스페이스와 잔액을 사용합니다. 이 앱은 Redrob Console을 변경하지 않습니다.
 

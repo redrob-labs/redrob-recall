@@ -45,7 +45,6 @@ const defaultSettings: AppSettings = {
   sendContextToRedrob: true,
   localApiEnabled: true,
   localApiPort: 47331,
-  redrobBaseUrl: "https://console.redrob.ai/api/backend/v1",
 };
 
 const demoEnabled =
@@ -121,7 +120,7 @@ function mockSnapshot(): AppSnapshot {
       connected: mockConnected,
       keyLabel: mockConnected ? "This device" : undefined,
       viaLauncher: false,
-      endpoint: defaultSettings.redrobBaseUrl,
+      endpoint: "http://127.0.0.1:4096",
     },
     dataDirectory: "~/.redrob/recall",
     // Read from the manifest the release bumps, so the demo cannot drift from the shipped version.
@@ -248,7 +247,7 @@ export const bridge = {
       connected: true,
       keyLabel: "This device",
       viaLauncher: false,
-      endpoint: defaultSettings.redrobBaseUrl,
+      endpoint: "http://127.0.0.1:4096",
     };
   },
   async disconnect(): Promise<ConnectionStatus> {
@@ -257,7 +256,7 @@ export const bridge = {
     return {
       connected: false,
       viaLauncher: false,
-      endpoint: defaultSettings.redrobBaseUrl,
+      endpoint: "http://127.0.0.1:4096",
     };
   },
   async openExternal(url: string): Promise<void> {

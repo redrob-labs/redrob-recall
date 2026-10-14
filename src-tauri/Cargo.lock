@@ -5360,6 +5360,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "redrob-engine-client"
+version = "0.1.0"
+source = "git+https://github.com/redrob-labs/redrob-code?tag=v0.6.3#ef3e511afb1107fd0066fa95cb29256b7d020d3c"
+dependencies = [
+ "base64 0.22.1",
+ "dirs",
+ "log",
+ "serde",
+ "serde_json",
+ "ureq",
+]
+
+[[package]]
 name = "redrob-recall"
 version = "0.2.0"
 dependencies = [
@@ -5378,6 +5391,7 @@ dependencies = [
  "pdf-extract",
  "qdrant-edge",
  "quick-xml",
+ "redrob-engine-client",
  "reqwest 0.12.28",
  "rusqlite",
  "serde",
@@ -5395,7 +5409,6 @@ dependencies = [
  "tower-http",
  "tracing",
  "tracing-subscriber",
- "url",
  "uuid",
  "walkdir",
  "zip 6.0.0",

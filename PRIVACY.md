@@ -16,7 +16,7 @@ The app stores the following under `~/.redrob/recall`:
 - up to three consistent metadata backups created manually or before migrations; and
 - a random token used to authenticate the loopback API.
 
-The Redrob workspace API key is stored in the operating system credential manager, not in the metadata database. When no key is stored there, the app reads the one Redrob Launcher shares with every Redrob app on this computer (`account.json` in the launcher's shared directory); it only reads that file, never writes or deletes it, and never logs or displays the key. Original files remain in their existing locations and are not copied into application storage.
+This app stores no Redrob workspace API key. The shared Redrob Code engine on this computer holds the key for every Redrob app; a key pasted into Connect is handed to the engine and not kept here, and a key an earlier version stored in the credential manager is handed over once and deleted. The app never logs or displays a key. Original files remain in their existing locations and are not copied into application storage.
 
 ## Network activity
 
@@ -26,7 +26,7 @@ Local Search performs extraction, embedding, keyword retrieval, semantic retriev
 
 ### Ask
 
-Ask is disabled unless the privacy setting **Allow Ask to send relevant excerpts** is enabled and a Redrob API key is available. For each Ask request, the app sends:
+Ask is disabled unless the privacy setting **Allow Ask to send relevant excerpts** is enabled and the Redrob Code engine is running and signed in. For each Ask request, the app sends:
 
 - the question you entered;
 - up to ten locally selected relevant text excerpts;
@@ -35,7 +35,7 @@ Ask is disabled unless the privacy setting **Allow Ask to send relevant excerpts
 
 The app does not include file paths, filenames, complete files, unrelated passages, embeddings, or the full index in that request. Returned answers, usage counts, model name, and latency are displayed in the current session.
 
-The request is sent to the configured Redrob API base URL, which defaults to `https://console.redrob.ai/api/backend/v1`. Processing by Redrob is governed by the terms and privacy commitments for your Redrob workspace.
+The request is sent to the Redrob Code engine on this computer (`127.0.0.1`, the daemon's `/v1/chat/completions` route, labelled `x-redrob-app: recall`), which applies its privacy settings and forwards it to Redrob. Processing by Redrob is governed by the terms and privacy commitments for your Redrob workspace.
 
 ### Application updates
 
@@ -56,7 +56,7 @@ The application does not include an analytics, advertising, crash-reporting, or 
 ## Delete local data
 
 - **Settings → Clear local index** removes searchable metadata, passages, and vectors but does not modify original files, watched-folder settings, or previously created backups.
-- **Disconnect Redrob** removes the stored API key from the operating system credential manager. It does not remove Redrob Launcher's shared sign-in; sign out in the launcher for that.
+- **Disconnect Redrob** removes the key from the Redrob Code engine. It does not remove Redrob Launcher's shared sign-in; sign out in the launcher for that.
 - To remove all app data, quit Redrob Recall and delete `~/.redrob/recall`.
 
 Removing a watched folder stops future indexing of it. Run **Check now** or clear/rebuild the local index to immediately reconcile files that were previously indexed.
