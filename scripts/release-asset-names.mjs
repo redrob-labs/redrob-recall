@@ -83,10 +83,6 @@ export const TARGET_TOKENS = {
   },
   "x86_64-pc-windows-msvc": { token: "windows-x64", tauriArches: ["x64"] },
   "aarch64-pc-windows-msvc": { token: "windows-arm64", tauriArches: ["arm64"] },
-  "x86_64-unknown-freebsd": {
-    token: "freebsd-x86_64",
-    tauriArches: ["amd64", "x86_64"],
-  },
 };
 
 // Exactly the os-arch tokens the launcher's Platform::tokens produces; `linux-x64` or
@@ -99,8 +95,7 @@ const LAUNCHER_TOKENS = new Set(
 // Which file suffixes each OS's bundler produces. A leg renames only its own OS's files, so a
 // Linux aarch64 leg can never claim the macOS `_aarch64.dmg`.
 const OS_SUFFIXES = {
-  linux: /^\.(AppImage|deb|rpm|flatpak|tar\.gz)(\.sig)?$/,
-  freebsd: /^\.tar\.gz(\.sig)?$/,
+  linux: /^\.(AppImage|deb|rpm|tar\.gz)(\.sig)?$/,
   macos: /^\.(dmg|app\.tar\.gz)(\.sig)?$/,
   windows: /^(-setup\.exe|\.msi|-portable\.zip)(\.sig)?$/,
 };
@@ -115,7 +110,6 @@ const EXTENSIONS = [
   "AppImage",
   "deb",
   "rpm",
-  "flatpak",
   "tar.gz",
   "exe",
   "app.tar.gz",
