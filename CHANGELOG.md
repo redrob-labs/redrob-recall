@@ -2,7 +2,19 @@
 
 All notable changes to Redrob Recall are documented here.
 
-## [Unreleased]
+## [0.3.2] - 2026-10-14
+
+### Fixed
+
+- The Windows release leg probed for the built binary without `.exe`; Git Bash reports that path as present when only the `.exe` exists, so the end-to-end-hook check then failed on a file that was not there (v0.3.1). The probe now prefers the `.exe`. No application change.
+
+## [0.3.1] - 2026-10-14
+
+### Fixed
+
+- The Linux release leg repacks the AppImage with appimagetool, which refuses to run without `desktop-file-validate`; the runner did not have it, so the v0.3.0 Linux build failed. The workflow now installs `desktop-file-utils`. No application change.
+
+## [0.3.0] - 2026-10-14
 
 ### Changed
 

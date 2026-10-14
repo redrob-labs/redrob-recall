@@ -112,10 +112,12 @@ jobs:
 
       - name: Install Linux desktop dependencies
         if: runner.os == 'Linux'
+        # desktop-file-utils: the AppImage repack step below runs appimagetool, which refuses to
+        # pack without `desktop-file-validate` on PATH (measured on the v0.3.0 Linux leg).
         run: >-
           sudo apt-get update && sudo apt-get install -y
           libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev
-          patchelf libssl-dev
+          patchelf libssl-dev desktop-file-utils
 
       - name: Set up Node.js
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
@@ -339,8 +341,9 @@ jobs:
         run: |
           set -euo pipefail
           dir="src-tauri/target/${RELEASE_TARGET}/release"
-          bin="$dir/redrob-recall"
-          [ -f "$bin" ] || bin="$dir/redrob-recall.exe"
+          # Prefer the .exe: on Windows, Git Bash answers `-f redrob-recall` with true when only
+          # redrob-recall.exe exists, so the old probe handed node a path that is not there.
+          if [ -f "$dir/redrob-recall.exe" ]; then bin="$dir/redrob-recall.exe"; else bin="$dir/redrob-recall"; fi
           node scripts/check-e2e-feature.mjs "$bin"
 
       # The default bundler ships the build host's libwayland in the AppImage, and on Mesa 25+ that
