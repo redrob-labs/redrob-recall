@@ -341,8 +341,9 @@ jobs:
         run: |
           set -euo pipefail
           dir="src-tauri/target/${RELEASE_TARGET}/release"
-          bin="$dir/redrob-recall"
-          [ -f "$bin" ] || bin="$dir/redrob-recall.exe"
+          # Prefer the .exe: on Windows, Git Bash answers `-f redrob-recall` with true when only
+          # redrob-recall.exe exists, so the old probe handed node a path that is not there.
+          if [ -f "$dir/redrob-recall.exe" ]; then bin="$dir/redrob-recall.exe"; else bin="$dir/redrob-recall"; fi
           node scripts/check-e2e-feature.mjs "$bin"
 
       # The default bundler ships the build host's libwayland in the AppImage, and on Mesa 25+ that

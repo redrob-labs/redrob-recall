@@ -2,6 +2,12 @@
 
 All notable changes to Redrob Recall are documented here.
 
+## [0.3.2] - 2026-10-14
+
+### Fixed
+
+- The Windows release leg probed for the built binary without `.exe`; Git Bash reports that path as present when only the `.exe` exists, so the end-to-end-hook check then failed on a file that was not there (v0.3.1). The probe now prefers the `.exe`. No application change.
+
 ## [0.3.1] - 2026-10-14
 
 ### Fixed
