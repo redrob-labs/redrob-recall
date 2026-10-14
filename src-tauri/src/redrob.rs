@@ -1,4 +1,11 @@
+//! Ask: local evidence, then one OpenAI-compatible chat request to the shared Redrob Code daemon.
+//!
+//! The daemon holds the Redrob console key and calls the console; this app never does, and there
+//! is no fallback to the console when the daemon is missing. The request and response shapes are
+//! the console's own, so the daemon forwards them unchanged.
+
 use crate::{
+    engine::{self, EngineError},
     models::{AnswerSource, AskRequest, AskResponse, SearchFilters, SearchRequest},
     search,
     state::AppState,
@@ -6,7 +13,7 @@ use crate::{
 use futures_util::StreamExt;
 use reqwest::{header::RETRY_AFTER, StatusCode};
 use serde::{Deserialize, Serialize};
-use std::{fmt, time::Duration};
+use std::fmt;
 
 const MAX_QUESTION_CHARACTERS: usize = 4_000;
 const MAX_CONTEXT_CHARACTERS: usize = 60_000;
@@ -48,11 +55,23 @@ impl RedrobError {
         )
     }
 
+    /// A daemon that cannot be reached, told as the two install sentences or the transport
+    /// failure. There is no console to fall back to, so none is offered.
+    fn from_engine(error: EngineError) -> Self {
+        let code = match &error {
+            EngineError::Unavailable(_) => "engine_unavailable",
+            EngineError::Transport(transport) if transport.is_timeout() => "timeout",
+            EngineError::Transport(_) => "network_error",
+        };
+        tracing::warn!(%error, "could not reach the Redrob Code engine");
+        Self::new(code, &error.to_string(), 503)
+    }
+
     fn from_response(status: StatusCode, retry_after_seconds: Option<u64>) -> Self {
         let (code, message, http_status) = match status.as_u16() {
             401 | 403 => (
                 "authentication_required",
-                "Your Redrob API key was rejected. Reconnect this device with a valid key.",
+                "Redrob rejected the sign-in Redrob Code holds. Sign in to Redrob again.",
                 401,
             ),
             402 => (
@@ -93,13 +112,6 @@ pub async fn ask(state: AppState, request: AskRequest) -> Result<AskResponse, Re
             403,
         ));
     }
-    let api_key = state.api_key().ok_or_else(|| {
-        RedrobError::new(
-            "not_connected",
-            "Connect Redrob or paste an API key before asking.",
-            401,
-        )
-    })?;
     let query = request.query.trim();
     if query.is_empty() || query.chars().count() > MAX_QUESTION_CHARACTERS {
         return Err(RedrobError::new(
@@ -212,40 +224,12 @@ pub async fn ask(state: AppState, request: AskRequest) -> Result<AskResponse, Re
             },
         ],
     };
-    let client = reqwest::Client::builder()
-        .connect_timeout(Duration::from_secs(10))
-        .timeout(Duration::from_secs(60))
-        .redirect(reqwest::redirect::Policy::none())
-        .retry(reqwest::retry::never())
-        .user_agent(concat!("Redrob-Recall/", env!("CARGO_PKG_VERSION")))
-        .build()
-        .map_err(RedrobError::local)?;
-    let endpoint = format!(
-        "{}/chat/completions",
-        settings.redrob_base_url.trim_end_matches('/')
-    );
     let started = std::time::Instant::now();
-    let response = client
-        .post(&endpoint)
-        .bearer_auth(&api_key)
-        .json(&body)
-        .send()
+    let response = state
+        .engine()
+        .chat_completions(&body)
         .await
-        .map_err(|error| {
-            tracing::warn!(%error, "could not reach Redrob");
-            let (code, message) = if error.is_timeout() {
-                (
-                    "timeout",
-                    "Redrob took too long to respond. Check your connection and try again.",
-                )
-            } else {
-                (
-                    "network_error",
-                    "Redrob could not be reached. Check your connection and try again.",
-                )
-            };
-            RedrobError::new(code, message, 503)
-        })?;
+        .map_err(RedrobError::from_engine)?;
     let status = response.status();
     let retry_after_seconds = response
         .headers()
@@ -253,6 +237,18 @@ pub async fn ask(state: AppState, request: AskRequest) -> Result<AskResponse, Re
         .and_then(|value| value.to_str().ok())
         .and_then(|value| value.parse().ok());
     if !status.is_success() {
+        // The one 401 that means "sign in": the daemon itself holds no console credential. Read
+        // from the error code, never the message, which is localized.
+        if status == StatusCode::UNAUTHORIZED {
+            let body = response.bytes().await.unwrap_or_default();
+            if engine::names_engine_not_authenticated(&body) {
+                return Err(RedrobError::new(
+                    "not_connected",
+                    "Sign in to Redrob before asking.",
+                    401,
+                ));
+            }
+        }
         return Err(RedrobError::from_response(status, retry_after_seconds));
     }
     if response

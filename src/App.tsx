@@ -1316,15 +1316,18 @@ function SettingsView({
                     : "Not connected"}
               </strong>
               <span>
-                {snapshot.connection.viaLauncher
-                  ? "This computer's Redrob sign-in is shared by Redrob Launcher. Sign out there to stop using it here."
-                  : snapshot.connection.connected
-                    ? "The key is verified by Redrob when you send your first question."
-                    : "Local indexing and search work without an account."}
+                {snapshot.connection.error
+                  ? snapshot.connection.error
+                  : snapshot.connection.viaLauncher
+                    ? "This computer's Redrob sign-in is shared by Redrob Launcher. Sign out there to stop using it here."
+                    : snapshot.connection.connected
+                      ? "The key is verified by Redrob when you send your first question."
+                      : "Local indexing and search work without an account."}
               </span>
             </div>
             {!compactLayout &&
               !snapshot.connection.viaLauncher &&
+              !snapshot.connection.error &&
               (snapshot.connection.connected ? (
                 <button className="secondary" onClick={() => void disconnect()}>
                   <Icon name="signOut" /> Disconnect

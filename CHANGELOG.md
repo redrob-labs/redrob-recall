@@ -4,9 +4,12 @@ All notable changes to Redrob Recall are documented here.
 
 ## [Unreleased]
 
+### Changed
+
+- Ask reaches the Redrob console only through the shared Redrob Code daemon (`<daemon>/v1/chat/completions`, with the daemon's authorization, `x-redrob-app: recall` and the query id as `x-redrob-session`). The daemon holds the console key: this app no longer stores one in the credential manager, reads `REDROB_API_KEY`, or reads Redrob Launcher's `account.json` -- the engine reads the launcher's sign-in itself. "Connect Redrob" hands the pasted key to the engine (`PUT /auth/redrob`); the connection panel reads signed-in status from the engine and says "Signed in with Redrob Launcher" when that is whose key it uses. A key an earlier version stored is handed to the engine once and deleted. The `redrobBaseUrl` setting is ignored. **Requires Redrob Code**: without it the panel says "Redrob Code is not installed. Install it with Redrob Launcher." with the launcher link, offers no Connect, and Ask reports the same; local indexing and search are unaffected.
+
 ### Added
 
-- Redrob Launcher's shared sign-in is used for Ask when this app has no workspace key of its own. The connection then reads "Signed in with Redrob Launcher"; a key stored by this app still wins, and Disconnect never touches the launcher's file.
 - Release assets are named `redrob-recall-<version>-<os>-<arch>.<ext>` (for example `redrob-recall-0.2.1-linux-x86_64.AppImage`), the shape Redrob Launcher installs, and the release workflow fails unless every asset parses that way. The updater manifest is repointed at the new names; installed clients are unaffected.
 - Every release carries `redrob-launcher.json` (`{ "schema": 1, "sharedAccount": true }`), so Redrob Launcher learns from the release itself that this version uses its shared sign-in. The release workflow fails unless the file is attached and valid.
 

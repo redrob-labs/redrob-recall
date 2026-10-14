@@ -1,12 +1,12 @@
 mod commands;
 mod embedding;
+mod engine;
 mod indexer;
 mod local_api;
 mod models;
 mod query;
 mod redrob;
 mod search;
-mod shared_account;
 mod state;
 mod storage;
 

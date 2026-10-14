@@ -16,8 +16,12 @@ fn command_error(error: impl std::fmt::Display) -> String {
     error.to_string()
 }
 
+/// The snapshot the window asks for itself (startup, coming back into focus): also the moment to
+/// ask the daemon whether it is signed in, since nothing emits when that changes elsewhere.
 #[tauri::command]
-pub fn get_snapshot(state: State<'_, AppState>) -> Result<AppSnapshot, String> {
+pub async fn get_snapshot(state: State<'_, AppState>) -> Result<AppSnapshot, String> {
+    let state = state.inner().clone();
+    state.refresh_connection().await;
     state.snapshot().map_err(command_error)
 }
 
@@ -181,24 +185,27 @@ pub fn save_settings(settings: AppSettings, state: State<'_, AppState>) -> Resul
     state.update_settings(settings).map_err(command_error)
 }
 
+/// Hands a pasted workspace key to the shared Redrob Code daemon, which keeps it. When there is
+/// no daemon the error is the install sentence, not a stored key.
 #[tauri::command]
-pub fn connect_with_api_key(
+pub async fn connect_with_api_key(
     api_key: String,
     state: State<'_, AppState>,
 ) -> Result<ConnectionStatus, String> {
-    state.set_api_key(api_key).map_err(command_error)?;
-    Ok(state.connection_status())
+    let state = state.inner().clone();
+    state.sign_in(api_key).await
 }
 
 #[tauri::command]
-pub fn disconnect_redrob(state: State<'_, AppState>) -> ConnectionStatus {
-    state.disconnect();
-    state.connection_status()
+pub async fn disconnect_redrob(state: State<'_, AppState>) -> Result<ConnectionStatus, String> {
+    let state = state.inner().clone();
+    state.sign_out().await
 }
 
 #[tauri::command]
-pub fn get_connection_status(state: State<'_, AppState>) -> ConnectionStatus {
-    state.connection_status()
+pub async fn get_connection_status(state: State<'_, AppState>) -> Result<ConnectionStatus, String> {
+    let state = state.inner().clone();
+    Ok(state.refresh_connection().await)
 }
 
 #[tauri::command]

@@ -11,7 +11,6 @@ export interface AppSettings {
   sendContextToRedrob: boolean;
   localApiEnabled: boolean;
   localApiPort: number;
-  redrobBaseUrl: string;
 }
 
 export interface IndexStats {
