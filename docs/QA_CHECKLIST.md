@@ -1,20 +1,20 @@
 # Release QA Checklist
 
-Complete this checklist against the exact signed draft-release artifacts. The GitHub Release and all of its assets must remain draft-only until QA is approved. Record the workflow run, commit SHA, operating-system version, architecture, and tester for every run.
+Complete this checklist against the exact signed release artifacts: a release candidate tag (`vX.Y.Z-rc.N`), which the workflow publishes as a **pre-release** that `latest` skips, or the artifacts of a dry run (**Run workflow** on `release.yml` with a version). Record the workflow run, commit SHA, operating-system version, architecture, and tester for every run.
 
 ## Install and lifecycle
 
-Two platforms are not built today, so their items are marked as such rather than deleted —
-deleting them loses the requirement when the platform comes back. Skip an item only when the
-tag run's `Resolve the release matrix` step reports that platform as not built.
+The tag run's `Resolve the release matrix` step prints the platforms it builds — Linux x64, macOS
+Apple Silicon and Windows x64 today. Skip an item only when that step reports its platform as not
+built.
 
-- [ ] *(Windows only, requires `WINDOWS_SIGNING_READY`)* Windows x64 NSIS installs per-user, starts, restarts, upgrades, and uninstalls cleanly.
-- [ ] *(Windows only, requires `WINDOWS_SIGNING_READY`)* Windows x64 MSI installs, upgrades, and uninstalls cleanly.
+- [ ] Windows x64 NSIS installs per-user, starts, restarts, upgrades, and uninstalls cleanly.
+- [ ] Windows x64 MSI installs, upgrades, and uninstalls cleanly.
 - [ ] macOS Apple Silicon DMG opens, passes Gatekeeper, installs, launches, and is notarized.
 - [ ] Linux x64 AppImage launches on the oldest supported distribution.
 - [ ] Linux x64 DEB installs with dependencies and removes cleanly.
 - [ ] A second launch focuses the existing window.
-- [ ] *(Windows only, requires `WINDOWS_SIGNING_READY`)* Windows NSIS/MSI installers have a valid Authenticode chain, the expected imported signer thumbprint, and a timestamp; no unsigned-code or unknown-publisher warning appears.
+- [ ] Windows NSIS/MSI installers have a valid Authenticode chain from `McKinley Rice, Inc.` and a timestamp; no unsigned-code or unknown-publisher warning appears.
 
 ## Local library
 
@@ -60,19 +60,19 @@ tag run's `Resolve the release matrix` step reports that platform as not built.
 
 ## Signed updater and release publication
 
-- [ ] A previous signed version detects the draft promoted to an isolated test channel.
+- [ ] A previous signed version, pointed at the release candidate's `latest.json`, detects it.
 - [ ] Correct update downloads, verifies, installs, and relaunches on every platform.
 - [ ] A modified artifact and invalid signature are rejected.
 - [ ] No update is offered for the same or an older version.
 - [ ] Backup/migration behavior is verified across the update.
-- [ ] `https://github.com/redrob-labs/redrob-recall/releases/latest/download/latest.json` still returns the PREVIOUS version while this release is a draft — a draft is not `latest`, and this is the whole draft gate.
+- [ ] `https://github.com/redrob-labs/redrob-recall/releases/latest/download/latest.json` still returns the PREVIOUS version while only the release candidate is published — a pre-release is not `latest`.
 - [ ] The approved release is a non-prerelease numeric `vMAJOR.MINOR.PATCH` tag whose commit is reachable from `origin/main`.
-- [ ] The `verify-release-assets` job passed on the tag run: `latest.json` attached, version matching the tag, and an installer present for every platform the run actually built (the job prints the list it required).
-- [ ] `latest.json` contains a signed entry for every built platform — `linux-x86_64` and `darwin-aarch64` today, plus `windows-x86_64` once `WINDOWS_SIGNING_READY` is set, in which case Windows selects the signed NSIS updater payload.
+- [ ] The `updater-manifest` job passed on the tag run: `latest.json` assembled with the tag's version, an installer present for every platform the run built, and every updater signature verified against the staged bytes (the job prints the list it required).
+- [ ] `latest.json` contains a signed entry for every built platform — `linux-x86_64`, `darwin-aarch64` and `windows-x86_64`; Windows selects the signed NSIS updater payload.
 - [ ] Every platform URL begins with `https://github.com/redrob-labs/redrob-recall/releases/download/`, is anonymously reachable with GET after publishing, and returns the exact approved size and SHA-256 bytes.
-- [ ] The bytes a client downloads after publishing are the same bytes QA downloaded from the draft — GitHub does not allow a published asset to be replaced under the same name, so verify the digests rather than assuming.
+- [ ] The bytes a client downloads match `SHA256SUMS.txt` on the release — GitHub does not allow a published asset to be replaced under the same name, so verify the digests rather than assuming.
 - [ ] A modified artifact and an invalid signature are still rejected by the installed client.
-- [ ] Publishing is the only action that makes the version live; no separate promotion job exists to wait for.
+- [ ] The `publish` job is the only action that makes the version live; no separate promotion job exists to wait for.
 
 ## Release decision
 
@@ -80,5 +80,5 @@ tag run's `Resolve the release matrix` step reports that platform as not built.
 - [ ] CI and all tag-triggered release jobs pass, including validation and RustSec audit.
 - [ ] Known limitations and support scope are in the release notes.
 - [ ] Privacy, security, license, notices, and changelog were reviewed.
-- [ ] A named release owner approves publishing the draft.
+- [ ] A named release owner approves cutting the release tag; the workflow publishes it.
 - [ ] The post-publication acceptance checks in `docs/RELEASING.md` pass: the `latest` manifest returns the approved version, every platform URL is anonymously reachable, and a previous production build updates into it on every platform.

@@ -53,14 +53,14 @@ Merges are squash-only and the branch is deleted on merge, so one pull request b
 on `develop`.
 
 Those branch names are now machine-checked rather than trusted. `.github/workflows/gitflow.yml`
-fails a pull request whose head branch is not `<type>/<slug>` with a type drawn from `feat`, `fix`,
-`chore`, `docs`, `test`, `refactor`, `perf`, `release`, `hotfix`, which is exactly the set
-`CONTRIBUTING.md` declares, and it exempts `develop` and `main` because a promotion or back-merge
-branch is not named after a type. It exists because a rule nothing checks is only a preference:
+calls the shared redrob-labs `gitflow` workflow (`redrob-labs/.github`), which fails a pull request
+whose head branch is not `<type>/<slug>` with a type drawn from the one org-wide list (`feat`, `fix`,
+`chore`, `docs`, `test`, `refactor`, `perf`, `ci`, `build`, `sync`, `hotfix`, `release`), and it
+exempts `develop` and `main` because a promotion or back-merge branch is not named after a type. It exists because a rule nothing checks is only a preference:
 branches have already appeared in this repository under a `kiro/` prefix that no document defines,
-and a branch name is supposed to say what the change is, not which tool produced it. The same file
-carries a second job, on `push` to `main` rather than on a pull request, that fails when `main`
-holds commits `develop` does not. That is the back-merge gap described above, and it is the one
+and a branch name is supposed to say what the change is, not which tool produced it. The same shared
+workflow carries a second job, on `push` to `main` rather than on a pull request, that fails when
+`main` holds commits `develop` does not and opens the back-merge pull request itself. That is the back-merge gap described above, and it is the one
 failure the two commands above cannot warn you about on their own, because both branches stay green
 while they drift.
 
@@ -100,11 +100,15 @@ lockfile change can merge red. The advisory database changes daily, so this job 
 branch that touched no dependency at all; compare the same job on `develop` before treating a
 finding as yours, and when it is real, bump the crate rather than allowing the advisory.
 
-`.github/workflows/release.yml` is named `Signed desktop release` and triggers **only** on
-`push` of tags matching `v*.*.*`. It never runs on a pull request, so nothing you do in a pull
-request exercises the bundling, signing, notarization, or updater-contract logic. Its credentialed
-jobs sit behind the `production-release` environment and hard-fail on missing Tauri signing or
-Apple notarization secrets rather than publishing unsigned artifacts. It also contains its own
+`.github/workflows/release.yml` is named `Signed desktop release` and triggers on `push` of tags
+matching `v*.*.*`, plus a `workflow_dispatch` with a version that is a dry run (builds, signs and
+checks everything, publishes nothing). It never runs on a pull request, so nothing you do in a pull
+request exercises the bundling, signing, notarization, or updater-contract logic; dispatch the dry
+run on your branch for that. Its credentialed jobs sit behind the `release` environment and
+hard-fail on missing Tauri signing, Apple notarization or Windows signing configuration rather than
+publishing unsigned artifacts. Windows signing (`sign.ps1`, Azure Artifact Signing through the
+job's OpenID Connect login) and the publish job are the shared redrob-labs workflows in
+`redrob-labs/.github`; the release is PUBLISHED as latest, not drafted. It also contains its own
 copy of a `Rust security advisories` job, which is why the name appears twice in the repository.
 
 ## Layout
@@ -176,10 +180,10 @@ regenerate them.
 required CI job pins the same version, while the advisories job deliberately uses `stable`. A
 local `cargo +stable` result is not what the required check measured.
 
-**Two platforms ship, and one of them cannot exist.** Releases build Linux x64 and macOS Apple
-Silicon. The Windows leg is skipped, not built unsigned, until the repository variable
-`WINDOWS_SIGNING_READY` is `"true"`, because an unsigned installer teaches users to click through
-the warning. macOS Intel is absent permanently: `ort-sys`, reached through `fastembed`, publishes
+**Three platforms ship, and a fourth cannot exist.** Releases build Linux x64, macOS Apple
+Silicon and Windows x64. On a tag the Windows leg refuses to run with signing unconfigured rather
+than build unsigned, because an unsigned installer teaches users to click through the warning (a
+dry run may build unsigned, with a warning). macOS Intel is absent permanently: `ort-sys`, reached through `fastembed`, publishes
 no prebuilt binary for `x86_64-apple-darwin`. `scripts/release-matrix.mjs` is the single list that
 drives both the build matrix and the updater platform keys, so add a platform there rather than in
 the workflow.

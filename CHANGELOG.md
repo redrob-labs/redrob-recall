@@ -2,6 +2,13 @@
 
 All notable changes to Redrob Recall are documented here.
 
+## [Unreleased]
+
+### Changed
+
+- The release workflow uses the shared redrob-labs pieces: `gitflow.yml` calls the org's reusable workflow (one branch-type list, automatic back-merge pull request); Windows installers are Authenticode-signed through Azure Artifact Signing with the job's OpenID Connect login and the shared `sign.ps1` as Tauri's sign command (no certificate file, no `WIN_CSC_*` secrets, `signtool verify /pa` must read Valid from `McKinley Rice, Inc.`); and the release is created and **published as latest** by the shared `release-publish` workflow, which also writes `SHA256SUMS.txt` and `redrob-launcher.json`. Nothing is drafted for a human to publish any more; a version with a `-` suffix publishes as a pre-release, which `latest` skips.
+- Each build leg stages its bundles under the Redrob Launcher names and writes its updater entries with the published download URLs; the `updater-manifest` job assembles `latest.json` from them and verifies every signature against the staged bytes before anything is published. The draft-release asset renamer, URL rewriter, manifest writer and release checker scripts are gone. `workflow_dispatch` with a version is a dry run. Build legs run in parallel. The `WINDOWS_SIGNING_READY` variable is no longer read. No application change.
+
 ## [0.3.2] - 2026-10-14
 
 ### Fixed
