@@ -10,8 +10,10 @@ no CDN.
 Production builds check
 `https://github.com/redrob-labs/redrob-recall/releases/latest/download/latest.json`. That
 path resolves to the newest **published, non-prerelease** release. A version with a
-pre-release suffix (`v0.4.0-rc.1`) is published as a pre-release, which `latest` skips, so a
-release candidate can be installed by hand without any installed client seeing it.
+pre-release suffix (`v0.4.0-1`) is published as a pre-release, which `latest` skips, so a
+release candidate can be installed by hand without any installed client seeing it. The
+pre-release identifier must be numeric (`-1`, `-2`, ...): Tauri's MSI bundler refuses any other
+form, and the `validate` job says so before anything is built.
 
 ## What is shared and what is this repository's
 
@@ -140,10 +142,10 @@ shared publish job, not here.
    installer, `latest.json`, `redrob-launcher.json` and `SHA256SUMS.txt`. Installed clients see
    the version from that moment.
 
-A release candidate rehearses all of it: tag `v0.2.0-rc.1` publishes a **pre-release**, which
+A release candidate rehearses all of it: tag `v0.2.0-1` publishes a **pre-release**, which
 `latest` skips, so it can be installed and checked against `docs/QA_CHECKLIST.md` on clean
 machines while installed clients keep their current version. A dry run that publishes nothing is
-**Run workflow** on `release.yml` with a version such as `0.2.0-rc.1`: every job builds, signs
+**Run workflow** on `release.yml` with a version such as `0.2.0-1`: every job builds, signs
 and checks exactly as on a tag, and the artifacts stay on the run.
 
 ## Acceptance after publishing

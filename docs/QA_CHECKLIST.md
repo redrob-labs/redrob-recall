@@ -1,6 +1,6 @@
 # Release QA Checklist
 
-Complete this checklist against the exact signed release artifacts: a release candidate tag (`vX.Y.Z-rc.N`), which the workflow publishes as a **pre-release** that `latest` skips, or the artifacts of a dry run (**Run workflow** on `release.yml` with a version). Record the workflow run, commit SHA, operating-system version, architecture, and tester for every run.
+Complete this checklist against the exact signed release artifacts: a release candidate tag (`vX.Y.Z-N`, numeric identifier), which the workflow publishes as a **pre-release** that `latest` skips, or the artifacts of a dry run (**Run workflow** on `release.yml` with a version). Record the workflow run, commit SHA, operating-system version, architecture, and tester for every run.
 
 ## Install and lifecycle
 

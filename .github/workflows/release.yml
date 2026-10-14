@@ -23,7 +23,7 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: Version for a dry run, e.g. 0.4.0-rc.1 (builds, signs and checks; publishes nothing)
+        description: Version for a dry run, e.g. 0.4.0-1 (builds, signs and checks; publishes nothing)
         type: string
         default: ""
 
@@ -71,8 +71,12 @@ jobs:
           else
             echo "::error::not a tag push and no version input"; exit 1
           fi
-          if ! printf '%s' "$v" | grep -Eq '^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-[0-9A-Za-z-]+(\.[0-9A-Za-z-]+)*)?$'; then
-            echo "::error::'$v' is not a version like 1.2.3 or 1.2.3-rc.1"; exit 1
+          # X.Y.Z, optionally with a NUMERIC pre-release identifier (0.4.0-1). Tauri's MSI bundler
+          # refuses any other pre-release form ("optional pre-release identifier in app version
+          # must be numeric-only and cannot be greater than 65535 for msi target"), measured on the
+          # first dry run of this workflow with 0.3.3-rc.1.
+          if ! printf '%s' "$v" | grep -Eq '^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-(0|[1-9][0-9]{0,4}))?$'; then
+            echo "::error::'$v' is not a version like 1.2.3 or 1.2.3-1 (the Windows MSI accepts only a numeric pre-release identifier up to 65535)"; exit 1
           fi
           echo "version=$v" >> "$GITHUB_OUTPUT"
           echo "### ${PRODUCT} v$v (\`${GITHUB_SHA::9}\`, ${GITHUB_REF_TYPE} ${GITHUB_REF_NAME})" >> "$GITHUB_STEP_SUMMARY"
