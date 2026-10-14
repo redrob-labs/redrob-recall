@@ -2,7 +2,7 @@
 
 All notable changes to Redrob Recall are documented here.
 
-## [Unreleased]
+## [0.3.0] - 2026-10-14
 
 ### Changed
 
