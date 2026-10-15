@@ -1,11 +1,31 @@
 name: Signed desktop release
 
-# Only a tag builds. There used to be a `release: [published]` trigger here for the CDN
-# promotion job; with GitHub Releases as the channel itself, publishing the draft IS the
-# promotion, so a second workflow run on that event would have nothing to do.
+# tag v<version> on main  ->  validate  ->  build (Linux / macOS / Windows)  ->  updater-manifest  ->  publish
+#
+# The parts every redrob-labs repository shares are called, not copied:
+#   - redrob-labs/.github/actions/sign-windows/sign.ps1      Authenticode through Azure Artifact Signing,
+#                                                            run by Tauri's bundler as `bundle.windows.signCommand`
+#   - redrob-labs/.github/.github/workflows/release-publish.yml   SHA256SUMS.txt, redrob-launcher.json, the release
+#
+# Rules this file encodes:
+#   - a tag push releases; `workflow_dispatch` with a version is a DRY RUN: every job builds, signs and
+#     checks exactly as on a tag, and nothing is published;
+#   - Windows: compile, THEN `azure/login` (OpenID Connect), THEN bundle -- the login token is short-lived
+#     and the compile is long. No certificate file and no client secret anywhere; on a tag the leg refuses
+#     to run with signing unconfigured rather than ship an unsigned installer;
+#   - the build legs run in the `release` environment with `id-token: write`;
+#   - the release is PUBLISHED as latest by the shared job once every build leg and the updater
+#     contract have passed (prerelease when the version carries a `-`). `releases/latest/download/latest.json`
+#     is the update channel, so publication is what makes a version live.
 on:
   push:
     tags: ["v*.*.*"]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Version for a dry run, e.g. 0.4.0-1 (builds, signs and checks; publishes nothing)
+        type: string
+        default: ""
 
 permissions:
   contents: read
@@ -14,26 +34,54 @@ concurrency:
   group: release-${{ github.ref }}
   cancel-in-progress: false
 
+env:
+  PRODUCT: Redrob Recall
+  PRODUCT_URL: https://github.com/${{ github.repository }}
+
 jobs:
   validate:
     name: Validate release tag
-    if: github.event_name == 'push'
     runs-on: ubuntu-24.04
     timeout-minutes: 45
     outputs:
-      # The build matrix and the updater platform keys the draft must carry, both derived from
-      # the single list in scripts/release-matrix.mjs.
+      # The version without the leading v: the tag's, or the dry-run input.
+      version: ${{ steps.version.outputs.version }}
+      # The build matrix and the updater platform keys, launcher tokens and asset suffixes the
+      # release must carry, all derived from the single list in scripts/release-matrix.mjs.
       matrix: ${{ steps.release-matrix.outputs.matrix }}
       platforms: ${{ steps.release-matrix.outputs.platforms }}
       asset_suffixes: ${{ steps.release-matrix.outputs.asset_suffixes }}
       launcher_tokens: ${{ steps.release-matrix.outputs.launcher_tokens }}
-      windows_signing_ready: ${{ steps.release-matrix.outputs.windows_signing_ready }}
     steps:
       - name: Check out source
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
+      - name: Resolve the version
+        id: version
+        shell: bash
+        env:
+          INPUT_VERSION: ${{ inputs.version }}
+        run: |
+          set -euo pipefail
+          if [ "${GITHUB_REF_TYPE:-}" = tag ]; then
+            v="${GITHUB_REF_NAME#v}"
+          elif [ -n "$INPUT_VERSION" ]; then
+            v="${INPUT_VERSION#v}"
+          else
+            echo "::error::not a tag push and no version input"; exit 1
+          fi
+          # X.Y.Z, optionally with a NUMERIC pre-release identifier (0.4.0-1). Tauri's MSI bundler
+          # refuses any other pre-release form ("optional pre-release identifier in app version
+          # must be numeric-only and cannot be greater than 65535 for msi target"), measured on the
+          # first dry run of this workflow with 0.3.3-rc.1.
+          if ! printf '%s' "$v" | grep -Eq '^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-(0|[1-9][0-9]{0,4}))?$'; then
+            echo "::error::'$v' is not a version like 1.2.3 or 1.2.3-1 (the Windows MSI accepts only a numeric pre-release identifier up to 65535)"; exit 1
+          fi
+          echo "version=$v" >> "$GITHUB_OUTPUT"
+          echo "### ${PRODUCT} v$v (\`${GITHUB_SHA::9}\`, ${GITHUB_REF_TYPE} ${GITHUB_REF_NAME})" >> "$GITHUB_STEP_SUMMARY"
       - name: Require release tag commit on main
+        if: github.ref_type == 'tag'
         shell: bash
         run: |
           git fetch --no-tags origin main:refs/remotes/origin/main
@@ -51,13 +99,8 @@ jobs:
         with:
           node-version: 22
           cache: npm
-      # Decides which platforms this release builds. Windows is omitted, with a notice in the
-      # run log, until the repository variable WINDOWS_SIGNING_READY is "true"; macOS Intel is
-      # not a platform this product can build at all -- see the script for both reasons.
       - name: Resolve the release matrix
         id: release-matrix
-        env:
-          WINDOWS_SIGNING_READY: ${{ vars.WINDOWS_SIGNING_READY }}
         run: node scripts/release-matrix.mjs
       - name: Set up Rust
         uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable
@@ -66,12 +109,13 @@ jobs:
           components: rustfmt, clippy
       - name: Install locked dependencies
         run: npm ci
+      # On a tag, check-version.mjs (inside verify) also requires the tag to equal the version the
+      # three manifests declare.
       - name: Run complete verification
         run: npm run verify
 
   rust-advisories:
     name: Rust security advisories
-    if: github.event_name == 'push'
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
@@ -88,27 +132,50 @@ jobs:
 
   build:
     name: Build ${{ matrix.label }}
-    if: github.event_name == 'push'
     needs: [validate, rust-advisories]
+    # `release` is the environment the organization's federated credential names
+    # (repo:redrob-labs/<repo>:environment:release); any other name is refused by Azure.
+    environment: release
     permissions:
-      contents: write
-    environment: production-release
+      contents: read
+      # The OpenID Connect token `azure/login` exchanges for the Artifact Signing credential on the
+      # Windows leg. The other legs never call the login step.
+      id-token: write
     strategy:
       fail-fast: false
-      max-parallel: 1
       matrix:
-        # Generated by scripts/release-matrix.mjs in the validate job: the Windows leg is
-        # excluded while Authenticode signing has no certificate, macOS Intel is excluded
-        # because ort-sys ships no ONNX Runtime binary for it, and the updater platform keys
-        # the verify job requires come from that same single list.
+        # Generated by scripts/release-matrix.mjs in the validate job. macOS Intel is excluded
+        # because ort-sys ships no ONNX Runtime binary for it; the updater platform keys the
+        # updater-manifest job requires come from that same single list.
         include: ${{ fromJSON(needs.validate.outputs.matrix) }}
     runs-on: ${{ matrix.platform }}
     timeout-minutes: 90
+    env:
+      RELEASE_VERSION: ${{ needs.validate.outputs.version }}
+      RELEASE_TARGET: ${{ matrix.target }}
+      # Plain IDs (not credentials); here so the login step can be skipped on a dry run where
+      # signing is not set up, and so a tag can refuse to build unsigned.
+      AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+      # Read by the shared sign.ps1 when Tauri's bundler runs it for the executable and each installer.
+      ARTIFACT_SIGNING_ENDPOINT: ${{ secrets.ARTIFACT_SIGNING_ENDPOINT }}
+      ARTIFACT_SIGNING_ACCOUNT: ${{ secrets.ARTIFACT_SIGNING_ACCOUNT }}
+      ARTIFACT_SIGNING_CERT_PROFILE: ${{ secrets.ARTIFACT_SIGNING_CERT_PROFILE }}
+      SIGN_DESCRIPTION: Redrob Recall
+      SIGN_URL: https://github.com/${{ github.repository }}
     steps:
       - name: Check out source
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
+
+      # The one copy of the Windows signing recipe, for Tauri's `bundle.windows.signCommand`.
+      - name: Check out the shared redrob-labs signing recipe
+        if: runner.os == 'Windows'
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: redrob-labs/.github
+          ref: main
+          path: .redrob-shared
 
       - name: Install Linux desktop dependencies
         if: runner.os == 'Linux'
@@ -144,6 +211,21 @@ jobs:
           test -n "$TAURI_UPDATER_PUBLIC_KEY"
           test -n "$TAURI_SIGNING_PRIVATE_KEY"
           test -n "$TAURI_SIGNING_PRIVATE_KEY_PASSWORD"
+
+      # A dry run may build unsigned (the shared script warns and leaves the files as they are); a
+      # tag may not. An unsigned installer that reaches a user is worse than no installer: it
+      # trains people to click through the warning.
+      - name: Require Windows signing configuration on a tag
+        if: runner.os == 'Windows' && github.ref_type == 'tag'
+        shell: bash
+        run: |
+          set -euo pipefail
+          for name in AZURE_CLIENT_ID ARTIFACT_SIGNING_ENDPOINT ARTIFACT_SIGNING_ACCOUNT ARTIFACT_SIGNING_CERT_PROFILE; do
+            if [ -z "${!name:-}" ]; then
+              echo "::error::$name is not configured; a tag does not release an unsigned Windows installer"
+              exit 1
+            fi
+          done
 
       - name: Require Apple signing and notarization credentials
         if: runner.os == 'macOS'
@@ -188,156 +270,50 @@ jobs:
           test -n "$CERT_ID"
           printf 'APPLE_SIGNING_IDENTITY=%s\n' "$CERT_ID" >> "$GITHUB_ENV"
 
-      - name: Import Windows code-signing certificate
-        if: runner.os == 'Windows'
-        shell: pwsh
-        env:
-          WIN_CSC_LINK: ${{ secrets.WIN_CSC_LINK }}
-          WIN_CSC_KEY_PASSWORD: ${{ secrets.WIN_CSC_KEY_PASSWORD }}
-        run: |
-          $ErrorActionPreference = "Stop"
-          if (-not $env:WIN_CSC_LINK -or -not $env:WIN_CSC_KEY_PASSWORD) {
-            throw "Windows signing secrets are required"
-          }
-
-          $certificatePath = Join-Path $env:RUNNER_TEMP "redrob-certificate.pfx"
-          $link = $env:WIN_CSC_LINK.Trim()
-          if ($link -match '^https://') {
-            try {
-              Invoke-WebRequest -Uri $link -OutFile $certificatePath -UseBasicParsing
-            } catch {
-              throw "Failed to download the Windows signing certificate over HTTPS"
-            }
-          } else {
-            if ($link -match '^data:[^,]*;base64,') {
-              $payload = $link.Substring($link.IndexOf(',') + 1)
-            } else {
-              $payload = $link
-            }
-            $payload = $payload -replace '\s', ''
-            if ($payload -notmatch '^[A-Za-z0-9+/]+={0,2}$') {
-              throw "WIN_CSC_LINK must be raw Base64 PFX data, a data:*;base64 URI, or an HTTPS URL"
-            }
-            try {
-              [IO.File]::WriteAllBytes($certificatePath, [Convert]::FromBase64String($payload))
-            } catch {
-              throw "WIN_CSC_LINK contains invalid Base64 certificate data"
-            }
-          }
-
-          $password = ConvertTo-SecureString $env:WIN_CSC_KEY_PASSWORD -AsPlainText -Force
-          $imported = @(Import-PfxCertificate -FilePath $certificatePath -CertStoreLocation Cert:\CurrentUser\My -Password $password)
-          $codeSigningOid = "1.3.6.1.5.5.7.3.3"
-          # Read the EKU out of the X.509 extension itself, not out of PowerShell's
-          # EnhancedKeyUsageList. That list's ObjectId is already a STRING, so the
-          # `.ObjectId.Value` this used to compare is always $null and the `-contains` never
-          # matched -- the filter rejected the organisation's certificate, which does carry
-          # Code Signing. A sibling product's diagnostic printed `eku=Code Signing ()` and
-          # "EKU is not Code Signing" in the same breath, which is the shape of a check
-          # reading the wrong property rather than a certificate that is wrong.
-          function Get-EkuOid([Security.Cryptography.X509Certificates.X509Certificate2]$candidate) {
-            $oids = @()
-            foreach ($extension in $candidate.Extensions) {
-              if ($extension.Oid.Value -ne "2.5.29.37") { continue }
-              $eku = $extension -as [Security.Cryptography.X509Certificates.X509EnhancedKeyUsageExtension]
-              if ($null -eq $eku) { continue }
-              foreach ($usage in $eku.EnhancedKeyUsages) {
-                $oids += if ($usage.FriendlyName) { "$($usage.FriendlyName) ($($usage.Value))" } else { $usage.Value }
-              }
-            }
-            return $oids
-          }
-          $certificate = $imported | Where-Object {
-            $_.HasPrivateKey -and
-            $_.NotBefore.ToUniversalTime() -le [DateTime]::UtcNow -and
-            $_.NotAfter.ToUniversalTime() -gt [DateTime]::UtcNow -and
-            ((Get-EkuOid $_) -match [regex]::Escape($codeSigningOid))
-          } | Sort-Object NotAfter -Descending | Select-Object -First 1
-          if (-not $certificate -or -not $certificate.Thumbprint) {
-            # One message for three independent conditions is not diagnosable: an expired
-            # certificate, one with no private key, and one issued for the wrong purpose all
-            # read the same. Only public metadata is printed -- never the key, the password,
-            # or the PFX bytes.
-            Write-Host "Imported $($imported.Count) certificate(s); none usable for code signing:"
-            foreach ($candidate in $imported) {
-              $ekus = @(Get-EkuOid $candidate)
-              $reasons = @()
-              if (-not $candidate.HasPrivateKey) { $reasons += "no private key" }
-              if ($candidate.NotBefore.ToUniversalTime() -gt [DateTime]::UtcNow) { $reasons += "not valid until $($candidate.NotBefore.ToUniversalTime().ToString('u'))" }
-              if ($candidate.NotAfter.ToUniversalTime() -le [DateTime]::UtcNow) { $reasons += "EXPIRED $($candidate.NotAfter.ToUniversalTime().ToString('u'))" }
-              if ($ekus.Count -eq 0) { $reasons += "no Enhanced Key Usage at all" }
-              elseif ($ekus -notmatch [regex]::Escape($codeSigningOid)) { $reasons += "EKU is not Code Signing" }
-              Write-Host "  subject=$($candidate.Subject)"
-              Write-Host "    validity=$($candidate.NotBefore.ToUniversalTime().ToString('u')) .. $($candidate.NotAfter.ToUniversalTime().ToString('u'))"
-              Write-Host "    hasPrivateKey=$($candidate.HasPrivateKey)  eku=$(if ($ekus.Count) { $ekus -join ', ' } else { '(none)' })"
-              Write-Host "    unusable because: $($reasons -join '; ')"
-            }
-            throw "WIN_CSC_LINK holds no certificate usable for Authenticode signing. See the per-certificate reasons above; the secret needs a PFX with a private key, an unexpired validity window, and the Code Signing EKU ($codeSigningOid)."
-          }
-          # The organisation's code-signing certificate is SELF-SIGNED. Measured, not assumed:
-          # the chain terminates in "a root certificate which is not trusted by the trust
-          # provider", and a sibling product that signs with this same secret says so in its
-          # own workflow and accepts NotTrusted there.
-          #
-          # So an untrusted or incomplete root is expected and is NOT a defect to fail on.
-          # Everything else still is -- a revoked certificate, one outside its validity window,
-          # a broken signature, a bad usage. Those are listed explicitly rather than the check
-          # being deleted, because deleting it would also stop catching a revoked certificate.
-          #
-          # WHAT THIS BUYS AND WHAT IT DOES NOT. It buys tamper-evidence and a stable publisher
-          # identity: the installer cannot be modified without breaking the signature. It does
-          # NOT buy trust -- Windows SmartScreen still warns the user that the publisher is
-          # unknown, exactly as it would for an unsigned installer. Removing that warning needs
-          # an OV or EV certificate from a CA whose root ships in Windows; no change to this
-          # workflow can substitute for one.
-          $chain = [Security.Cryptography.X509Certificates.X509Chain]::new()
-          $chain.ChainPolicy.RevocationMode = [Security.Cryptography.X509Certificates.X509RevocationMode]::Online
-          $chain.ChainPolicy.RevocationFlag = [Security.Cryptography.X509Certificates.X509RevocationFlag]::ExcludeRoot
-          $built = $chain.Build($certificate)
-          $tolerated = @("UntrustedRoot", "PartialChain", "RevocationStatusUnknown", "OfflineRevocation")
-          $fatal = @($chain.ChainStatus | Where-Object { $tolerated -notcontains $_.Status.ToString() })
-          if ($fatal.Count -gt 0) {
-            $chainErrors = ($fatal | ForEach-Object { "$($_.Status): $($_.StatusInformation.Trim())" }) -join "; "
-            throw "Windows code-signing certificate chain validation failed: $chainErrors"
-          }
-          if (-not $built) {
-            Write-Host "::warning::certificate chain is not publicly trusted ($(($chain.ChainStatus | ForEach-Object { $_.Status.ToString() }) -join ', ')). The installer is signed and tamper-evident, but Windows will still warn that the publisher is unknown until an OV/EV certificate replaces this one."
-          }
-          "WIN_CSC_CERTIFICATE_THUMBPRINT=$($certificate.Thumbprint)" | Out-File -FilePath $env:GITHUB_ENV -Append
-          Remove-Item -LiteralPath $certificatePath -Force
-
+      # Writes src-tauri/tauri.release.conf.json: updater key and endpoint, the release version,
+      # and on Windows the shared sign.ps1 as the bundler's sign command.
       - name: Prepare signed updater configuration
         env:
           TAURI_UPDATER_PUBLIC_KEY: ${{ vars.TAURI_SIGNING_PUBLIC_KEY }}
-          WIN_CSC_CERTIFICATE_THUMBPRINT: ${{ env.WIN_CSC_CERTIFICATE_THUMBPRINT }}
         run: npm run release:prepare
 
-      - name: Build, sign, and upload installers
-        uses: tauri-apps/tauri-action@1deb371b0cd8bd54025b384f1cd735e725c4060f # action-v1.0.0
+      # Windows compiles first and bundles after the login: Tauri signs the executable and the
+      # installers while bundling, and the OpenID Connect token is short-lived.
+      - name: Compile (Windows, unsigned, no bundle)
+        if: runner.os == 'Windows'
+        shell: bash
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        run: npm run tauri build -- --target "$RELEASE_TARGET" --no-bundle --config src-tauri/tauri.release.conf.json
+
+      - name: Log in to Azure (OIDC)
+        if: runner.os == 'Windows' && env.AZURE_CLIENT_ID != ''
+        uses: azure/login@a641126d1b8aa4d1fa005f4f92df94a3a4c4c906 # v3.1.0
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      # macOS signs and notarizes here through the Tauri CLI (APPLE_* environment). Windows signs
+      # here through the shared sign.ps1 the bundler calls for the executable, the NSIS installer and
+      # the MSI; each call verifies with `signtool verify /pa` and logs `signed by CN=McKinley Rice, Inc.`.
+      - name: Build and bundle
+        shell: bash
+        env:
+          BUNDLES: ${{ matrix.bundles }}
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
           APPLE_SIGNING_IDENTITY: ${{ env.APPLE_SIGNING_IDENTITY }}
           APPLE_API_KEY: ${{ secrets.APPLE_NOTARY_API_KEY_ID }}
           APPLE_API_ISSUER: ${{ secrets.APPLE_NOTARY_API_ISSUER_ID }}
           APPLE_API_KEY_PATH: ${{ env.APPLE_API_KEY_PATH }}
-        with:
-          tagName: v__VERSION__
-          releaseName: Redrob Recall v__VERSION__
-          releaseBody: See CHANGELOG.md for release notes. Installers and updater bundles are signed; the release remains a draft until platform smoke tests are approved.
-          releaseDraft: true
-          prerelease: false
-          uploadUpdaterJson: true
-          updaterJsonPreferNsis: true
-          args: --target ${{ matrix.target }} --bundles ${{ matrix.bundles }} --config src-tauri/tauri.release.conf.json
+        run: npm run tauri build -- --target "$RELEASE_TARGET" --bundles "$BUNDLES" --config src-tauri/tauri.release.conf.json
 
       # The e2e cargo feature lets a WebDriver test choose the library folder through an environment
       # variable. Prove from the shipped bytes, on every platform, that it is not in this build.
       - name: Prove the release binary carries no end-to-end test hook
         shell: bash
-        env:
-          RELEASE_TARGET: ${{ matrix.target }}
         run: |
           set -euo pipefail
           dir="src-tauri/target/${RELEASE_TARGET}/release"
@@ -350,16 +326,14 @@ jobs:
       # makes WebKitWebProcess abort with EGL_BAD_PARAMETER: the window opens and stays blank
       # (tauri-apps/tauri#15665). Measured on v0.2.0 before this step existed -- strace on the web
       # process, then the same AppImage with only those four libraries removed rendered with no
-      # environment overrides. Repacking changes the bytes, so the script also re-signs and patches
-      # latest.json; a stale signature still looks signed and breaks every future update.
+      # environment overrides. Repacking changes the bytes, so the script also re-signs; the staged
+      # .sig is what latest.json carries and what the updater-manifest job verifies.
       - name: Repack the AppImage without bundled Wayland, and re-sign it
         if: runner.os == 'Linux'
         shell: bash
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
-          RELEASE_TARGET: ${{ matrix.target }}
           # Pinned by digest: this binary rewrites a signed release artifact.
           APPIMAGETOOL_URL: https://github.com/AppImage/appimagetool/releases/download/1.9.0/appimagetool-x86_64.AppImage
           APPIMAGETOOL_SHA256: 46fdd785094c7f6e545b61afcfb0f3d98d8eab243f644b4b17698c01d06083d1
@@ -371,290 +345,125 @@ jobs:
           chmod +x "$tool"
           # Runners have no FUSE; both the tool and the AppImage run through their own extractor.
           export APPIMAGE_EXTRACT_AND_RUN=1
-          bash scripts/resign-linux-appimage.sh \
-            "src-tauri/target/${RELEASE_TARGET}/release/bundle" "${GITHUB_REF_NAME}" "$tool"
+          bash scripts/resign-linux-appimage.sh "src-tauri/target/${RELEASE_TARGET}/release/bundle" "$tool"
 
-      - name: Verify Windows installer signatures and timestamps
+      # Both installers must exist and, when signing is configured, carry a Valid Authenticode
+      # signature from the organization's certificate (`signtool verify /pa` in sign.ps1 already
+      # refused anything else; this is the gate that the bundler called it for every file). A dry run
+      # without signing configuration reports the installers as unsigned and passes.
+      - name: Verify the Windows installers
         if: runner.os == 'Windows'
         shell: pwsh
-        env:
-          RELEASE_TARGET: ${{ matrix.target }}
-          WIN_CSC_CERTIFICATE_THUMBPRINT: ${{ env.WIN_CSC_CERTIFICATE_THUMBPRINT }}
         run: |
           $ErrorActionPreference = "Stop"
           $bundlePath = Join-Path $PWD "src-tauri/target/$env:RELEASE_TARGET/release/bundle"
           $installers = @(Get-ChildItem -LiteralPath $bundlePath -Recurse -File | Where-Object { $_.Extension -in '.exe', '.msi' })
           if (-not ($installers.Extension -contains '.exe') -or -not ($installers.Extension -contains '.msi')) {
-            throw "Expected both signed NSIS and MSI installers"
+            throw "Expected both NSIS and MSI installers"
           }
-          # A self-signed signer makes Get-AuthenticodeSignature report NotTrusted or
-          # UnknownError rather than Valid, on a runner that does not carry our root. Those two
-          # are accepted; HashMismatch and NotSigned are not, so an unsigned or modified
-          # installer still fails here. The signer thumbprint and the countersignature are
-          # asserted unconditionally -- those say it is OUR certificate and that the signing
-          # time is attested, neither of which depends on the root being trusted.
-          $accepted = @("Valid", "NotTrusted", "UnknownError")
+          $configured = $env:ARTIFACT_SIGNING_ENDPOINT -and $env:ARTIFACT_SIGNING_ACCOUNT -and $env:ARTIFACT_SIGNING_CERT_PROFILE
           foreach ($installer in $installers) {
             $signature = Get-AuthenticodeSignature -LiteralPath $installer.FullName
-            if ($accepted -notcontains $signature.Status.ToString()) {
-              throw "Installer signature is not usable for $($installer.Name): $($signature.Status) ($($signature.StatusMessage))"
+            if (-not $configured) {
+              Write-Host "::warning::$($installer.Name) is unsigned (Artifact Signing not configured; dry run)"
+              continue
             }
-            if (-not $signature.SignerCertificate) {
-              throw "Installer carries no Authenticode signer certificate: $($installer.Name)"
+            if ($signature.Status -ne 'Valid') {
+              throw "$($installer.Name) signature status $($signature.Status): $($signature.StatusMessage)"
             }
-            if ($signature.SignerCertificate.Thumbprint -ne $env:WIN_CSC_CERTIFICATE_THUMBPRINT) {
-              throw "Installer was signed by an unexpected certificate: $($installer.Name)"
+            $cn = $signature.SignerCertificate.GetNameInfo([Security.Cryptography.X509Certificates.X509NameType]::SimpleName, $false)
+            if ($cn -ne 'McKinley Rice, Inc.') {
+              throw "$($installer.Name) signed by CN=$cn, expected CN=McKinley Rice, Inc."
             }
             if (-not $signature.TimeStamperCertificate) {
-              throw "Installer signature carries no trusted timestamp: $($installer.Name)"
+              throw "$($installer.Name) carries no trusted timestamp"
             }
-            Write-Host "$($installer.Name) signed by $($signature.SignerCertificate.Subject) status=$($signature.Status)"
+            Write-Host "$($installer.Name) signed by CN=$cn status=$($signature.Status)"
           }
 
       # Tauri names its files `Redrob Recall_<ver>_<arch>.<ext>`; Redrob Launcher installs only
-      # `redrob-recall-<ver>-<os>-<arch>.<ext>` (see scripts/release-asset-names.mjs). Renaming is a
-      # PATCH on each asset -- same bytes, same id -- so the updater signatures stay valid, and
-      # latest.json is repointed at the new names in the same step. Runs after the AppImage repack,
-      # which must see the bundler's own name.
-      - name: Rename the uploaded assets for Redrob Launcher
+      # `redrob-recall-<ver>-<os>-<arch>.<ext>` (scripts/release-asset-names.mjs). The files are copied
+      # under the launcher names into the release artifact, and this leg's updater entries (signature
+      # text + published download URL) are written as a fragment for the updater-manifest job.
+      - name: Stage the assets under the names Redrob Launcher installs
         shell: bash
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          RELEASE_TARGET: ${{ matrix.target }}
-        run: node scripts/rename-release-assets.mjs "${GITHUB_REPOSITORY}" "${GITHUB_REF_NAME}" "${RELEASE_TARGET}"
+        run: >-
+          node scripts/stage-release-assets.mjs
+          "src-tauri/target/${RELEASE_TARGET}/release/bundle" "$RELEASE_VERSION" "$RELEASE_TARGET"
+          dist/release "dist/updater/${RELEASE_TARGET}.json"
 
-  # The CDN promotion job that used to live here is gone: GitHub Releases is now the
-  # update channel itself, so there is nothing to copy anywhere. What that job also
-  # did, though, was VERIFY the published channel -- so its checks are re-pointed
-  # here rather than dropped. Without them the classic failure is silent: the app
-  # installs fine and never updates again, because `latest.json` is missing or its
-  # platform URLs point somewhere a client cannot reach.
-  verify-release-assets:
-    name: Updater contract on the draft release
-    if: github.event_name == 'push'
+      - name: Upload the release assets
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: release-${{ matrix.target }}
+          path: dist/release/*
+          if-no-files-found: error
+
+      - name: Upload the updater fragment
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: updater-${{ matrix.target }}
+          path: dist/updater/*.json
+          if-no-files-found: error
+
+      - name: Remove the temporary keychain
+        if: always() && runner.os == 'macOS'
+        shell: bash
+        run: |
+          if [ -f "$RUNNER_TEMP/redrob-build.keychain" ]; then security delete-keychain "$RUNNER_TEMP/redrob-build.keychain" || true; fi
+
+  # latest.json IS the feed on GitHub Releases. Missing it does not fail an install, it silently
+  # freezes every existing client on its current version; a URL pointing anywhere but this
+  # repository's own release assets is the same failure. So the manifest is assembled from the legs'
+  # fragments and the whole set is checked -- names, platforms, URLs, and every signature against
+  # the bytes it covers -- BEFORE the publish job can make it latest. The manifest rides to the
+  # publish job as a `release-*` artifact like every other asset.
+  updater-manifest:
+    name: Updater contract on the release assets
     needs: [validate, build]
     runs-on: ubuntu-24.04
     timeout-minutes: 15
-    permissions:
-      # write, not read: this job does not merely inspect the manifest, it corrects the
-      # placeholder URLs tauri-action necessarily wrote while the release was a draft.
-      contents: write
     steps:
-      - name: Check out the tag
+      - name: Check out source
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-
-      # tauri-action uploads latest.json while the release is a DRAFT, and a draft asset has
-      # no public download URL yet -- GitHub only mints /releases/download/<tag>/<name> at
-      # publication -- so the manifest carries REST asset URLs
-      # (https://api.github.com/repos/.../releases/assets/<id>) instead. Those would break the
-      # updater: that endpoint serves the asset's JSON metadata unless the caller sends
-      # `Accept: application/octet-stream`, which a plain updater fetch does not. The published
-      # URL is fully determined by the tag and the asset name, so it is written now and is
-      # correct the moment the draft is published.
-      - name: Point the updater manifest at the published download URLs
+      - name: Set up Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 22
+      - name: Download the release assets
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          pattern: release-*
+          path: assets
+          merge-multiple: true
+      - name: Download the updater fragments
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          pattern: updater-*
+          path: fragments
+          merge-multiple: true
+      - name: Assemble latest.json and verify the updater contract
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          RELEASE_TAG: ${{ github.ref_name }}
-        shell: bash
-        run: |
-          set -euo pipefail
-          # A DRAFT release is NOT on the tags endpoint: GET /releases/tags/<tag> answers 404
-          # until publication, because a draft has no published tag to resolve. Since this job
-          # exists to inspect the draft, it has to find it in the listing, which does include
-          # drafts for a caller with push access.
-          gh api "repos/${GITHUB_REPOSITORY}/releases?per_page=100" > "$RUNNER_TEMP/releases.json"
-          release_json="$(jq --arg tag "${RELEASE_TAG}" 'map(select(.tag_name == $tag)) | first // empty' "$RUNNER_TEMP/releases.json")"
-          if [ -z "$release_json" ]; then
-            echo "::error::No release found for ${RELEASE_TAG}. A draft is only listed to a caller with push access, so check this job's contents permission if the draft does exist."
-            exit 1
-          fi
-          printf '%s' "$release_json" > release.json
-          manifest_id="$(printf '%s' "$release_json" | jq -r '.assets[] | select(.name == "latest.json") | .id')"
-          if [ -z "$manifest_id" ] || [ "$manifest_id" = "null" ]; then
-            echo "::error::latest.json is not attached to ${RELEASE_TAG}; nothing to rewrite"
-            exit 1
-          fi
-          gh api -H "Accept: application/octet-stream" \
-            "repos/${GITHUB_REPOSITORY}/releases/assets/${manifest_id}" > latest.json
-          node scripts/rewrite-updater-urls.mjs latest.json release.json \
-            "${GITHUB_REPOSITORY}" "${RELEASE_TAG}"
-          # Replace in place: an asset name is unique per release, so the old one must go
-          # before the corrected manifest can take its name.
-          gh api -X DELETE "repos/${GITHUB_REPOSITORY}/releases/assets/${manifest_id}"
-          gh release upload "${RELEASE_TAG}" latest.json --repo "${GITHUB_REPOSITORY}"
-
-      # Redrob Launcher reads this one small file from every release to learn that the release uses
-      # its shared sign-in (launcher docs/release-manifest.md). Without it the launcher falls back to
-      # its built-in table and users see "Next release uses this sign-in" forever. Written from the
-      # same module the checker below reads, uploaded while the release is still a draft, then
-      # downloaded back so the check runs against the bytes GitHub actually serves. This repo has no
-      # SHA256SUMS.txt (the updater signs each asset instead), so there is no sums file to list it in.
-      - name: Upload the Redrob Launcher release manifest
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          RELEASE_TAG: ${{ github.ref_name }}
-        shell: bash
-        run: |
-          set -euo pipefail
-          node scripts/write-launcher-manifest.mjs redrob-launcher.json
-          gh release upload "${RELEASE_TAG}" redrob-launcher.json --clobber --repo "${GITHUB_REPOSITORY}"
-          # Re-read the draft so release.json, which the next step checks, lists the new asset.
-          gh api "repos/${GITHUB_REPOSITORY}/releases?per_page=100" > "$RUNNER_TEMP/releases.json"
-          jq --arg tag "${RELEASE_TAG}" 'map(select(.tag_name == $tag)) | first' "$RUNNER_TEMP/releases.json" > release.json
-          manifest_id="$(jq -r '.assets[] | select(.name == "redrob-launcher.json") | .id' release.json)"
-          if [ -z "$manifest_id" ] || [ "$manifest_id" = "null" ]; then
-            echo "::error::redrob-launcher.json did not attach to ${RELEASE_TAG}"
-            exit 1
-          fi
-          gh api -H "Accept: application/octet-stream" \
-            "repos/${GITHUB_REPOSITORY}/releases/assets/${manifest_id}" > "$RUNNER_TEMP/redrob-launcher.json"
-          cmp redrob-launcher.json "$RUNNER_TEMP/redrob-launcher.json"
-
-      # Every file on the release must be one Redrob Launcher can parse, every built leg must
-      # have left an installable one, and redrob-launcher.json must be attached and valid. A
-      # bundler or action upgrade that changes the file names fails here instead of shipping a
-      # release the launcher silently skips.
-      - name: Assert every asset carries a name Redrob Launcher can install
-        env:
-          RELEASE_TAG: ${{ github.ref_name }}
-          LAUNCHER_TOKENS: ${{ needs.validate.outputs.launcher_tokens }}
-          LAUNCHER_MANIFEST_PATH: ${{ runner.temp }}/redrob-launcher.json
-        shell: bash
-        run: node scripts/check-release-asset-names.mjs release.json "${RELEASE_TAG}" ${LAUNCHER_TOKENS}
-
-      - name: Assert the draft release carries a usable updater manifest
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          RELEASE_TAG: ${{ github.ref_name }}
-          REQUIRED_PLATFORMS: ${{ needs.validate.outputs.platforms }}
-          REQUIRED_ASSET_SUFFIXES: ${{ needs.validate.outputs.asset_suffixes }}
-        shell: bash
-        run: |
-          set -euo pipefail
-
-          # The release is still a draft at this point, which is deliberate: draft
-          # assets are invisible to `releases/latest/download/...`, so QA happens
-          # before any installed client can see the version.
-          # A DRAFT release is NOT on the tags endpoint: GET /releases/tags/<tag> answers 404
-          # until publication, because a draft has no published tag to resolve. Since this job
-          # exists to inspect the draft, it has to find it in the listing, which does include
-          # drafts for a caller with push access.
-          gh api "repos/${GITHUB_REPOSITORY}/releases?per_page=100" > "$RUNNER_TEMP/releases.json"
-          release_json="$(jq --arg tag "${RELEASE_TAG}" 'map(select(.tag_name == $tag)) | first // empty' "$RUNNER_TEMP/releases.json")"
-          if [ -z "$release_json" ]; then
-            echo "::error::No release found for ${RELEASE_TAG}. A draft is only listed to a caller with push access, so check this job's contents permission if the draft does exist."
-            exit 1
-          fi
-          draft="$(printf '%s' "$release_json" | jq -r '.draft')"
-          if [ "$draft" != "true" ]; then
-            echo "::error::Release ${RELEASE_TAG} must still be a draft when the build finishes"
-            exit 1
-          fi
-
-          names="$(printf '%s' "$release_json" | jq -r '.assets[].name')"
-          echo "Assets on ${RELEASE_TAG}:"
-          printf '  %s\n' $names
-
-          # latest.json IS the feed on GitHub Releases. Missing it does not fail an
-          # install, it silently freezes every existing client on its current version.
-          if ! printf '%s\n' $names | grep -qx 'latest.json'; then
-            echo "::error::latest.json is not attached; published clients would never see this release"
-            exit 1
-          fi
-
-          # Suffixes come from the same generator that built the matrix, so a bundle type no
-          # leg produces is not demanded. Glob matching rather than a regex keeps the list
-          # free of escaping, since it crosses a job output boundary.
-          for suffix in ${REQUIRED_ASSET_SUFFIXES}; do
-            found=0
-            for name in $names; do
-              case "$name" in
-                *"$suffix") found=1; break ;;
-              esac
-            done
-            if [ "$found" -ne 1 ]; then
-              echo "::error::no asset ending in ${suffix} -- a built platform produced no installer"
-              exit 1
-            fi
-          done
-
-          manifest_id="$(printf '%s' "$release_json" | jq -r '.assets[] | select(.name == "latest.json") | .id')"
-          gh api -H 'Accept: application/octet-stream' \
-            "repos/${GITHUB_REPOSITORY}/releases/assets/${manifest_id}" > latest.json
-
-          version="$(jq -r '.version' latest.json)"
-          if [ "v${version}" != "${RELEASE_TAG}" ]; then
-            echo "::error::latest.json version ${version} does not match tag ${RELEASE_TAG}"
-            exit 1
-          fi
-
-          # Every architecture a build leg produced must be present, and every URL must
-          # point at this repository's own release assets. A URL left pointing at a
-          # decommissioned host is exactly the shape of failure this job exists to catch.
-          # The list comes from the same generator that built the matrix, so a platform that
-          # was deliberately not built is not demanded here, and a platform that WAS built
-          # cannot be quietly missing from the manifest.
-          for platform in ${REQUIRED_PLATFORMS}; do
-            url="$(jq -r --arg p "$platform" '.platforms[$p].url // empty' latest.json)"
-            sig="$(jq -r --arg p "$platform" '.platforms[$p].signature // empty' latest.json)"
-            if [ -z "$url" ] || [ -z "$sig" ]; then
-              echo "::error::latest.json is missing a signed entry for ${platform}"
-              exit 1
-            fi
-            case "$url" in
-              "https://github.com/${GITHUB_REPOSITORY}/releases/download/"*) ;;
-              *)
-                echo "::error::${platform} url is not a release asset of this repository: ${url}"
-                exit 1
-                ;;
-            esac
-          done
-
-          echo "latest.json covers every built platform (${REQUIRED_PLATFORMS}), is signed, and points only at this repository's release assets."
-
-      # "Has a signature" is not "has the right signature". A signature over different bytes passes
-      # the check above and fails on every user's machine at the first update check -- and the
-      # AppImage repack step rewrites bytes after tauri-action signed them, so this is a live risk,
-      # not a theoretical one. Measured before adding this: the published v0.2.0 signature is VALID
-      # for the published AppImage and INVALID for the same file repacked.
-      - name: Verify every updater signature against the bytes it covers
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          RELEASE_TAG: ${{ github.ref_name }}
           TAURI_UPDATER_PUBLIC_KEY: ${{ vars.TAURI_SIGNING_PUBLIC_KEY }}
-        shell: bash
-        run: |
-          set -euo pipefail
-          test -n "$TAURI_UPDATER_PUBLIC_KEY"
-          gh api "repos/${GITHUB_REPOSITORY}/releases?per_page=100" > "$RUNNER_TEMP/releases.json"
-          release_json="$(jq --arg tag "${RELEASE_TAG}" 'map(select(.tag_name == $tag)) | first // empty' "$RUNNER_TEMP/releases.json")"
-          manifest_id="$(printf '%s' "$release_json" | jq -r '.assets[] | select(.name == "latest.json") | .id')"
-          gh api -H 'Accept: application/octet-stream' \
-            "repos/${GITHUB_REPOSITORY}/releases/assets/${manifest_id}" > "$RUNNER_TEMP/latest.json"
+          REQUIRED_PLATFORMS: ${{ needs.validate.outputs.platforms }}
+          REQUIRED_LAUNCHER_TOKENS: ${{ needs.validate.outputs.launcher_tokens }}
+          REQUIRED_ASSET_SUFFIXES: ${{ needs.validate.outputs.asset_suffixes }}
+        run: node scripts/assemble-updater-manifest.mjs assets fragments "${{ needs.validate.outputs.version }}"
+      - name: Upload the updater manifest
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: release-updater-manifest
+          path: assets/latest.json
+          if-no-files-found: error
 
-          dl="$RUNNER_TEMP/updater-assets"
-          mkdir -p "$dl"
-          checked=0
-          # One line per platform entry: "<key> <asset name> <signature>". Signatures are base64,
-          # so they never contain a space.
-          while read -r platform asset signature; do
-            asset_id="$(printf '%s' "$release_json" | jq -r --arg n "$asset" '.assets[] | select(.name == $n) | .id')"
-            if [ -z "$asset_id" ]; then
-              echo "::error::${platform} names ${asset}, which is not attached to ${RELEASE_TAG}"
-              exit 1
-            fi
-            [ -f "$dl/$asset" ] || gh api -H 'Accept: application/octet-stream' \
-              "repos/${GITHUB_REPOSITORY}/releases/assets/${asset_id}" > "$dl/$asset"
-            if ! result="$(node scripts/verify-updater-signature.mjs "$TAURI_UPDATER_PUBLIC_KEY" "$signature" "$dl/$asset")"; then
-              echo "::error::${platform}: ${result} (${asset})"
-              exit 1
-            fi
-            echo "${platform}: ${result} (${asset})"
-            checked=$((checked + 1))
-          done < <(jq -r '.platforms | to_entries[] | "\(.key) \(.value.url | split("/") | last) \(.value.signature)"' "$RUNNER_TEMP/latest.json")
-
-          if [ "$checked" -eq 0 ]; then
-            echo "::error::latest.json has no platform entries; nothing was verified"
-            exit 1
-          fi
-          echo "Every one of ${checked} updater signatures verifies against the bytes it names."
+  publish:
+    needs: [validate, rust-advisories, build, updater-manifest]
+    if: always() && github.ref_type == 'tag' && !contains(needs.*.result, 'failure') && !contains(needs.*.result, 'cancelled') && !contains(needs.*.result, 'skipped')
+    uses: redrob-labs/.github/.github/workflows/release-publish.yml@main
+    permissions:
+      contents: write
+    with:
+      version: ${{ needs.validate.outputs.version }}
+      title: Redrob Recall
+      launcher_manifest: true
+      publish: true

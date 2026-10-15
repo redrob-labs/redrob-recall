@@ -28,8 +28,9 @@ Two long-lived branches. `develop` is where work lands; `main` is what has been 
   open pull requests back into it. Clone the repository and you are on `develop`.
 - **`main`** is the released state. It takes pull requests only from `release/*` and `hotfix/*`
   branches, and release tags are cut from it. Nothing else merges here.
-- **Working branches** are `<type>/<short-slug>` off `develop`, e.g. `fix/index-restart`, `feat/pdf-extract`. Types: `feat`,
-  `fix`, `chore`, `docs`, `test`, `refactor`, `perf`.
+- **Working branches** are `<type>/<short-slug>` off `develop`, e.g. `fix/index-restart`, `feat/pdf-extract`. Types are the
+  redrob-labs org list, checked by the shared `gitflow` workflow: `feat`, `fix`, `chore`, `docs`, `test`,
+  `refactor`, `perf`, `ci`, `build`, `sync`, `hotfix`, `release`.
 - **Merging is squash-only**, and the branch is deleted on merge. One pull request becomes one
   commit, so `git log develop` reads as a list of changes rather than a graph. The squash commit's
   body is the pull request body, not a concatenation of your work-in-progress messages.
@@ -111,7 +112,9 @@ bump the crate rather than allowing the advisory.
 
 **`release.yml`** builds and publishes on a tag. It is maintainer-only by construction: it fires on
 `push: tags`, verifies the tag commit is an ancestor of `main`, and puts the credentialed jobs behind
-the `production-release` environment. That ancestor check is what makes the branch model real — a tag
+the `release` environment. Windows signing and the publish step are the shared redrob-labs
+workflows (`redrob-labs/.github`); a `workflow_dispatch` with a version is a dry run that publishes
+nothing. That ancestor check is what makes the branch model real — a tag
 cut from `develop` is refused rather than shipped.
 
 Run `npm run check` and `cargo test --workspace` before pushing.

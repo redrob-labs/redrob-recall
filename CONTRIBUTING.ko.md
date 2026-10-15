@@ -109,8 +109,9 @@ advisory 스캔은 매일 바뀌는 데이터베이스를 읽으므로, 의존�
 허용하지 말고 crate를 올립니다.
 
 **`release.yml`**은 태그가 붙으면 빌드하고 배포합니다. 구조상 메인테이너 전용입니다. `push: tags`로
-발동하고, 태그 커밋이 `main`의 조상인지 검증하며, 자격증명을 쓰는 잡은 `production-release` 환경
-뒤에 둡니다. 이 조상 검사가 브랜치 모델을 실제로 만들어 줍니다. `develop`에서 뗀 태그는 출시되는
+발동하고, 태그 커밋이 `main`의 조상인지 검증하며, 자격증명을 쓰는 잡은 `release` 환경
+뒤에 둡니다. Windows 서명과 발행 단계는 redrob-labs 공용 워크플로(`redrob-labs/.github`)이며, 버전을
+넣은 `workflow_dispatch`는 아무것도 발행하지 않는 드라이런입니다. 이 조상 검사가 브랜치 모델을 실제로 만들어 줍니다. `develop`에서 뗀 태그는 출시되는
 대신 거부됩니다.
 
 push 전에 `npm run check`와 `cargo test --workspace`를 돌리세요.
