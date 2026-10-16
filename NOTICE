@@ -20,5 +20,9 @@ makes this notice required rather than courteous. The version is pinned exactly 
 third-party technology; Redrob Recall is not an official Qdrant product and is
 not endorsed by Qdrant Solutions GmbH.
 
+Inter (apps/redrob-recall/assets/fonts/Inter-*.ttf) and JetBrains Mono
+(apps/redrob-recall/assets/fonts/JetBrainsMono-Regular.ttf) are bundled under the
+SIL Open Font License 1.1; see OFL-Inter.txt and OFL-JetBrainsMono.txt beside them.
+
 "Redrob" and the Redrob logo are trademarks of Redrob. The Apache License grants
 no rights to use them; see LICENSE section 6.

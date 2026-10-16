@@ -44,10 +44,11 @@ tar -C "$stage" -czf "$out/${base}.tar.gz" .
 # The same tree as a package for apt; the system's own uninstall removes it.
 python3 tools/release/make_deb.py "$stage" "$version" "$out/${base}.deb"
 cp LICENSE NOTICE THIRD_PARTY_NOTICES.md UPSTREAM_NOTICES.md "$out/"
-# redrob-launcher.json: what Redrob Recall reads to learn this release uses its sign-in. Written
+# redrob-launcher.json and the icon it names: what Redrob Launcher reads to learn this release uses
+# its sign-in and which icon to show for it. Written
 # before the sums so the launcher's quota-free path, which reads the sums file, sees it too.
 python3 tools/release_manifest.py --write "$out"
 ( cd "$out" && sha256sum "${base}.tar.gz" "${base}.deb" \
-    LICENSE NOTICE THIRD_PARTY_NOTICES.md UPSTREAM_NOTICES.md redrob-launcher.json > "${base}-SHA256SUMS.txt" )
+    LICENSE NOTICE THIRD_PARTY_NOTICES.md UPSTREAM_NOTICES.md redrob-launcher.json redrob-recall.png > "${base}-SHA256SUMS.txt" )
 python3 tools/release_manifest.py --check "$out"
 ls -l "$out"
