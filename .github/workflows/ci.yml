@@ -1,9 +1,14 @@
+# The one pull-request workflow, adapted from redrob-canvas. `checks` runs the repository scripts in
+# seconds: the brand pins (scripts/check-brand.py) and the version/CHANGELOG agreement. `rust` runs
+# formatting, clippy and the tests of our crates with `--profile ci` (root Cargo.toml: every
+# dependency at opt-level 0, no incremental), and is skipped when no Rust input changed or when the
+# pull request targets main (that code already passed here on its way into develop). The release
+# workflow does not repeat any of this; PR policy and gitflow are the org-wide workflows.
 name: CI
 
 on:
   pull_request:
-  push:
-    branches: [main, develop]
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -12,59 +17,72 @@ concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: true
 
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: 0
+  RUST_BACKTRACE: 1
+  OUR_CRATES: -p redrob-recall -p redrob-recall-core -p redrob-recall-api
+
 jobs:
-  verify:
-    name: Verify source and desktop core
-    runs-on: ubuntu-24.04
-    timeout-minutes: 45
+  checks:
+    name: brand pins, version
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
-      - name: Check out source
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.3.1
+      - name: Brand assets match the design system pins
+        run: python3 scripts/check-brand.py
+      - name: Workspace version has its CHANGELOG section
+        run: python3 scripts/check-version.py
 
-      - name: Install Linux desktop dependencies
-        run: >-
-          sudo apt-get update && sudo apt-get install -y
-          libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev
-          patchelf libssl-dev
-
-      - name: Set up Node.js
-        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+  rust:
+    name: fmt, clippy, test (profile ci)
+    # A release PR into main carries code that already passed here on its way into develop.
+    if: github.base_ref != 'main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.3.1
+      - name: Did any Rust input change?
+        id: rs
+        run: |
+          git fetch -q origin "${{ github.base_ref }}" --depth=1
+          if git diff --quiet "origin/${{ github.base_ref }}"...HEAD -- '*.rs' '*.toml' Cargo.lock .cargo crates/redrob-recall-core/tests .github/workflows/ci.yml; then
+            echo changed=false >> "$GITHUB_OUTPUT"; else echo changed=true >> "$GITHUB_OUTPUT"; fi
+      - name: System libraries for the desktop app
+        if: steps.rs.outputs.changed == 'true'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            libxkbcommon-dev libwayland-dev libx11-dev libxrandr-dev libxi-dev \
+            libgl1-mesa-dev libgtk-3-dev
+      - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable
+        if: steps.rs.outputs.changed == 'true'
         with:
-          node-version: 22
-          cache: npm
-
-      - name: Set up Rust
-        uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable
-        with:
-          toolchain: 1.95.0
+          toolchain: "1.95.0"
           components: rustfmt, clippy
-
-      - name: Install locked JavaScript dependencies
-        run: npm ci
-
+      - uses: Swatinem/rust-cache@v2
+        if: steps.rs.outputs.changed == 'true'
+        with:
+          key: ci-profile
       # The indexer tests embed real files with the real model, which fastembed downloads on first
       # use (465 MB). Keyed on the source that names the model, so changing the model refetches it.
       - name: Cache the embedding model used by the indexer tests
+        if: steps.rs.outputs.changed == 'true'
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
-          path: src-tauri/target/test-model-cache
-          key: embedding-model-${{ hashFiles('src-tauri/src/embedding.rs') }}
-
-      - name: Run complete verification
-        run: npm run verify
-
-  rust-advisories:
-    name: Rust security advisories
-    runs-on: ubuntu-24.04
-    timeout-minutes: 15
-    steps:
-      - name: Check out source
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - name: Set up Rust for security audit
-        uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable
-        with:
-          toolchain: stable
-      - name: Install pinned cargo-audit
-        run: cargo +stable install cargo-audit --version 0.22.2 --locked
-      - name: Audit locked Rust dependencies
-        run: cargo +stable audit --file src-tauri/Cargo.lock
+          path: crates/redrob-recall-core/target/test-model-cache
+          key: embedding-model-${{ hashFiles('crates/redrob-recall-core/src/embedding.rs') }}
+      - name: Formatting
+        if: steps.rs.outputs.changed == 'true'
+        run: cargo fmt --all -- --check
+      - name: Clippy
+        if: steps.rs.outputs.changed == 'true'
+        run: |
+          # shellcheck disable=SC2086 # OUR_CRATES is a list of flags on purpose
+          cargo clippy $OUR_CRATES --all-targets --locked --profile ci -- -D warnings
+      - name: Tests
+        if: steps.rs.outputs.changed == 'true'
+        run: |
+          # shellcheck disable=SC2086
+          cargo test $OUR_CRATES --locked --profile ci

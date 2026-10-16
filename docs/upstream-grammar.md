@@ -1,6 +1,6 @@
 # Grammar reduction harness
 
-Stage 2, fourth harness. For the search query language in `src-tauri/src/query.rs`.
+Stage 2, fourth harness. For the search query language in `crates/redrob-recall-core/src/query.rs`.
 
 ## The problem it fixes
 

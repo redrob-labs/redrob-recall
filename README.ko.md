@@ -2,183 +2,136 @@
 
 [English](./README.md) · **한국어**
 
-Redrob Recall은 폴더를 검색하고 내 파일에 근거해 질문에 답하는 로컬 우선 데스크톱 앱입니다. 파일, 추출한 텍스트, 임베딩, 검색 색인 전체가 기기에 남습니다. 검색은 무료이고 로컬에서 돌아갑니다. **Ask**를 쓸 때만 질문과 관련 있는 텍스트 발췌 몇 개가 기존 Redrob API로 전송되며, 파일명·경로·파일 전체·색인 전체는 보내지 않습니다.
+Redrob Recall은 Redrob 앱들의 로컬 메모리입니다. 내가 고른 폴더를 내 컴퓨터에서 임베딩·키워드 색인으로
+만들어 최신 상태로 유지하고, Redrob Office·Chat·Code·Canvas 같은 앱이 하나의 루프백 API로 그 색인을
+검색합니다. 폴더를 추가하고, 검색하고, 내 파일을 근거로 답하는 질문을 던지는 얇은 창도 함께 있습니다.
 
-**컴퓨터 안의 모든 것을 검색 가능하게.**
+파일, 추출한 텍스트, 임베딩, 색인 전체는 기기 안에 남습니다. 검색은 무료이고 로컬입니다. **Ask**만
+질문과 일치한 몇 개의 문단을 Redrob 콘솔로 보내며, 이때 Redrob Launcher로 이 컴퓨터에 로그인한 계정을
+씁니다. 파일 이름, 경로, 파일 전체, 색인은 절대 보내지 않습니다.
 
-## 무엇을 하는가
+## 구성
 
-- Docker나 별도 데이터베이스 서버 없이 선택한 폴더를 색인합니다.
-- PDF, DOCX, TXT, Markdown, RST, CSV, JSON, HTML, XML, 로그 파일을 읽습니다.
-- 다국어 의미 검색과 키워드 매칭을 함께 씁니다.
-- 선택한 폴더를 감시해 파일이 바뀌면 로컬 라이브러리를 갱신합니다.
-- 모든 결과를 원래 위치에서 열거나 파일 탐색기에 표시합니다.
-- 로컬 파일로 되돌아가는 번호가 붙은 인용과 함께 Redrob 답변을 만듭니다.
-- 루프백 전용, 베어러 인증이 걸린 API를 선택적으로 제공합니다.
+| 부분 | 위치 | 역할 |
+| --- | --- | --- |
+| `redrob-recall-core` | `crates/redrob-recall-core` | 라이브러리로서의 메모리 레이어: 추출(PDF, DOCX, TXT, Markdown, RST, CSV, JSON, HTML, XML, 로그), 분절, SQLite + FTS5 키워드 색인, Qdrant Edge에 담긴 로컬 다국어 임베딩, 하이브리드 검색, 폴더 감시, 라이브러리 저장소. 창도 네트워크도 없습니다. |
+| `redrob-recall-api` | `crates/redrob-recall-api` | 다른 Redrob 앱이 호출하는 루프백 HTTP API(127.0.0.1, 베어러 토큰 하나)와 그 타입드 Rust 클라이언트. [docs/API.md](docs/API.md). |
+| `redrob-recall` | `apps/redrob-recall` | 데스크톱 창(eframe/egui, wgpu)과 CLI: `serve`, `index <dir>`, `search <query>`. 창이 열려 있는 동안 API도 서비스합니다. |
 
-## 구조
+모든 데이터는 `~/.redrob/recall`에 있습니다(`REDROB_RECALL_DATA_DIR`로 바꿀 수 있음):
 
-| 계층 | 구현 |
-| --- | --- |
-| 데스크톱 셸 | Tauri 2 |
-| 인터페이스 | React 19 + TypeScript + Vite |
-| 메타데이터·키워드 검색 | SQLite + FTS5 |
-| 벡터 검색 | Qdrant Edge, 프로세스 내 임베드 |
-| 로컬 임베딩 | FastEmbed `MultilingualE5Small`, 384차원 |
-| 파일 감시 | `notify` |
-| Redrob 답변 | 설정된 Redrob base URL의 `POST /chat/completions` |
+- `metadata.db`: 문서 메타데이터, 추출한 문단, FTS5 색인
+- `qdrant-edge/`: 로컬 벡터 색인
+- `models/`: 내려받은 임베딩 모델(`multilingual-e5-small`, 384차원)
+- `local-api-token`, `local-api-address`: 같은 기기의 클라이언트가 API를 찾고 인증하는 방법
+- `backups/`: `metadata.db`의 일관된 복사본([백업과 복구](docs/RECOVERY.md))
 
-애플리케이션 데이터는 `~/.redrob/recall`에 저장됩니다.
+원본 파일은 이 디렉터리에 복사되지 않습니다.
 
-- `metadata.db`: 문서 메타데이터, 추출한 구절, FTS 데이터
-- `qdrant-edge/`: 로컬 의미 색인
-- `models/`: 내려받은 로컬 임베딩 모델
-- `local-api-token`: 생성된 로컬 API 베어러 토큰(Unix에서 `0600`)
+## 창
 
-원본 파일은 이 디렉터리로 복사되지 않습니다. 일관성 있는 메타데이터 백업은 `~/.redrob/recall/backups`에 보관합니다. [백업과 복구](docs/RECOVERY.md)를 보세요.
+- **Library**: 폴더 목록과 각 폴더의 파일 수, 진행 중인 색인과 진행률, 일시정지 / 재개 / 지금 확인,
+  폴더 추가, 제거.
+- **Search**: 의미와 키워드를 함께 따져 순위를 매긴 결과, 일치한 문단, 열기, 파일 관리자에서 보기.
+  따옴표 구문, `-제외어`, `heading:단어`, `접두어*`가 동작합니다.
+- **Ask**: 질문, `[1]`, `[2]` 인용이 붙은 콘솔의 답, 그 아래 출처(열기·보기). 공유 로그인이
+  필요하며, 없으면 로컬에서 찾은 출처만 보여 줍니다.
+- **Settings**: 답변 모델, 파일 형식과 문단 크기, 로컬 API 스위치와 포트, 계정 상태, 상태 점검,
+  백업, 색인 비우기.
 
-## 신뢰성과 복구
+## 로그인
 
-Redrob Recall은 시작할 때 메타데이터 데이터베이스를 검증하고, 순서가 정해진 스키마 마이그레이션을 적용하며, 마이그레이션 전 백업을 만듭니다. 문서는 의미 벡터가 커밋될 때까지 pending 상태로 남으므로, 중단된 색인은 다음 스캔에서 복구할 수 있습니다. 손상된 파생 색인은 조용히 덮어쓰지 않고 격리하며, 연결이 끊긴 감시 드라이브를 삭제된 라이브러리로 취급하지 않습니다.
+Recall에는 자체 로그인이 없습니다. [Redrob Launcher](https://github.com/redrob-labs/redrob-launcher/releases/latest)에서
+한 번 로그인하면 Recall을 포함한 이 컴퓨터의 모든 Redrob 앱이 그 계정을 씁니다. 런처가 공유
+`account.json`을 쓰고 Recall이 읽습니다(바뀌면 바로 알아챕니다). `REDROB_API_KEY` 환경변수나 Recall
+데이터 폴더의 자체 `account.json`이 있으면 그것이 공유 파일보다 우선합니다. Recall은 키를 쓰거나
+기록하거나 화면에 보여 주지 않습니다.
 
-**설정 → 저장소**에서 상태 점검을 돌리거나 메타데이터 백업을 직접 만들 수 있습니다. 백업에는 추출한 구절과 경로가 들어 있으니 운영체제의 전체 디스크 암호화로 보호해야 합니다.
-
-## 개발 환경에서 실행
-
-### 사전 요구 사항
-
-- Node.js 22 이상
-- npm 11 이상
-- Rust 1.95.0 (`rust-toolchain.toml`이 자동으로 선택)
-- 운영체제별 Tauri 2 시스템 의존성
-
-Linux 패키지 이름은 배포판마다 다릅니다. 일반적인 Debian/Ubuntu 환경에는 WebKitGTK 4.1, GTK 3, librsvg, 빌드 도구가 필요합니다.
-
-```bash
-sudo apt update
-sudo apt install -y build-essential curl wget file libwebkit2gtk-4.1-dev \
-  libappindicator3-dev librsvg2-dev libssl-dev patchelf
-```
-
-의존성을 설치하고 데스크톱 앱을 실행합니다.
-
-```bash
-npm install
-npm run tauri dev
-```
-
-화면 개발용 프런트엔드 전용 데모 데이터도 있습니다.
-
-```bash
-npm run dev
-# http://localhost:1420/?demo=1 열기
-```
-
-처음 색인하거나 검색할 때 다국어 임베딩 모델을 내려받습니다. 그 다음부터는 색인과 검색이 네트워크 없이 로컬에서 동작합니다.
-
-## 인스톨러 빌드
-
-서명 없는 로컬 개발 번들:
-
-```bash
-npm ci
-npm run tauri build
-```
-
-Tauri는 플랫폼별 번들을 `src-tauri/target/release/bundle/`에 씁니다. 프로덕션 인스톨러는 리뷰를 거친 **Signed desktop release** 워크플로만 만듭니다. 그 워크플로는 [릴리스 안내](docs/RELEASING.md)에 적힌 외부 업데이터·Apple 서명 시크릿을 요구하며, 자격 증명이 없으면 서명되지 않은 산출물을 발행하는 대신 릴리스를 중단합니다.
-
-현재 릴리스하는 플랫폼은 **Linux x64**와 **Apple Silicon macOS**입니다. Windows x64는 코드 서명 인증서가 구성된 뒤에만 빌드·서명되며, 그때까지는 서명 없는 인스톨러를 내보내는 대신 그 레그를 의도적으로 건너뜁니다. Intel Mac은 지원하지 않습니다: 내장된 ONNX Runtime(`fastembed` 경유 `ort-sys`)이 `x86_64-apple-darwin` 바이너리를 제공하지 않습니다.
-
-발행된 빌드는 **설정 → 업데이트**에서 서명된 stable 업데이트 채널을 확인합니다. 업데이트 메타데이터와 인스톨러 서명은 설치 전에 Tauri가 검증합니다. 로컬 개발 빌드에는 의도적으로 업데이트 키와 엔드포인트를 설정하지 않습니다.
-
-### Qdrant Edge 컴파일러 호환성
-
-애플리케이션은 Qdrant Edge 0.8.0을 고정합니다. 이 릴리스는 Rust 1.95에서 아직 feature 게이트가 걸린 표준 라이브러리 매크로를 씁니다. `.cargo/config.toml`이 `RUSTC_BOOTSTRAP`과 `-Zcrate-attr=feature(assert_matches)`로 필요한 크레이트 속성만 좁게 켭니다. 안정 버전 Rust에서 그대로 빌드되는 상류 릴리스로 올릴 때 이 우회를 제거하세요. 켜는 feature 범위를 넓히지 마세요.
-
-## Redrob 연결
-
-Ask는 이 컴퓨터의 공용 **Redrob Code** 엔진을 거칩니다. 엔진이 모든 Redrob 앱의 콘솔 키를 갖습니다. [Redrob Launcher](https://github.com/redrob-labs/redrob-launcher/releases/latest)로 설치하세요. 엔진이 없으면 연결 패널이 그렇게 알리고 Ask는 쓸 수 없습니다(로컬 색인과 검색은 그대로 동작합니다).
-
-이 컴퓨터가 이미 Redrob Launcher로 로그인되어 있으면 아무것도 붙여 넣을 필요가 없습니다. 엔진이 그 로그인을 읽고 패널에 **Redrob Launcher로 로그인됨**이 표시됩니다. 그렇지 않으면:
-
-1. `https://console.redrob.ai/api-keys`에서 워크스페이스 API 키를 만들거나 고릅니다.
-2. **Ask** 또는 **설정 → Redrob 연결**을 엽니다.
-3. 키를 붙여 넣습니다. 앱은 키를 엔진에 넘기고(`PUT /auth/redrob`) 자기 복사본을 두지 않습니다.
-
-런처 공유 로그인의 로그아웃은 런처에서 합니다. 이전 버전이 저장한 키는 한 번 엔진에 넘기고 자격 증명 관리자에서 지웁니다.
-
-로컬 색인과 검색에는 Redrob이 필요하지 않습니다. Ask는 제공한 키에 연결된 워크스페이스와 잔액을 사용합니다. 이 앱은 Redrob Console을 변경하지 않습니다.
-
-## 프라이버시 동작
-
-- 폴더 선택, 텍스트 추출, 청킹, 임베딩, 키워드 검색, 의미 검색은 모두 기기에서 일어납니다.
-- 검색은 질의나 결과를 Redrob에 전송하지 않습니다.
-- Ask는 질문과 관련 발췌 문자열 최대 10개를 보냅니다. 파일명, 경로, 원본 파일, 색인 전체는 보내지 않습니다.
-- **Ask가 관련 발췌를 전송하도록 허용**을 끄면 백엔드 경계에서 Ask가 차단됩니다.
-- 분석·텔레메트리 SDK는 포함되어 있지 않습니다.
-
-전체 데이터 흐름과 삭제 방법은 [PRIVACY.md](PRIVACY.md)를 보세요.
-
-## 로컬 API
-
-API는 `127.0.0.1`에만 바인딩하고 기본 포트는 `47331`입니다. 모든 엔드포인트가 `~/.redrob/recall/local-api-token`의 토큰을 요구합니다.
+## 다른 앱에서 쓰기
 
 ```bash
 TOKEN="$(cat ~/.redrob/recall/local-api-token)"
+BASE="$(cat ~/.redrob/recall/local-api-address)"   # 기본 http://127.0.0.1:47331
 
-curl -H "Authorization: Bearer $TOKEN" \
-  http://127.0.0.1:47331/health
+curl -H "Authorization: Bearer $TOKEN" "$BASE/health"
 
-curl -X POST http://127.0.0.1:47331/v1/search \
-  -H "Authorization: Bearer $TOKEN" \
-  -H "Content-Type: application/json" \
-  -d '{"query":"India launch decision","limit":8,"filters":{"extensions":[],"pathPrefix":null}}'
+curl -X POST "$BASE/v1/search" -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
+  -d '{"query":"인도 출시 결정","limit":8}'
 
-curl -X POST http://127.0.0.1:47331/v1/ask \
-  -H "Authorization: Bearer $TOKEN" \
-  -H "Content-Type: application/json" \
-  -d '{"query":"What did we decide about India?","sourceIds":[],"maxSources":6}'
+curl -X POST "$BASE/v1/ask-context" -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
+  -d '{"query":"인도 건은 어떻게 결정했지?","maxSources":6}'
 ```
 
-로컬 API 스위치나 포트를 바꾸면 Redrob Recall을 재시작한 뒤에 적용됩니다. 로컬 API를 통한 Ask도 UI와 같은 프라이버시 설정과 Redrob 연결 요구 사항을 따릅니다.
+Rust에서는 `redrob-recall-api`를 `client` 기능으로 의존하고 `RecallClient::discover()`를 호출합니다.
+모든 경로는 [docs/API.md](docs/API.md)에 있습니다.
 
-## 자주 쓰는 명령
+## 개발 실행
+
+Rust 1.95.0(`rust-toolchain.toml`이 고름). Linux에서는 egui·wgpu·rfd가 링크하는 X11/Wayland/GL
+헤더가 필요합니다:
 
 ```bash
-npm run check                    # TypeScript와 잠긴 Rust 검사
-npm run check:version            # 릴리스 버전이 모두 일치하는지 확인
-npm run test:rust                # 마이그레이션·검증·API 오류 테스트
-npm run verify                   # 전체 빌드, 감사, 포매팅, 테스트, Clippy
-npm run format                   # Prettier와 rustfmt
-npm audit                        # JavaScript 의존성 감사
-cargo clippy --locked --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings
+sudo apt-get install -y libxkbcommon-dev libwayland-dev libx11-dev libxrandr-dev libxi-dev \
+  libgl1-mesa-dev libgtk-3-dev
 ```
 
-## 기여
+```bash
+cargo run -p redrob-recall                       # 창
+cargo run -p redrob-recall -- serve              # API만
+cargo run -p redrob-recall -- index ~/Documents  # 터미널에서 폴더 색인
+cargo run -p redrob-recall -- search "예산"
+```
 
-[CONTRIBUTING.md](CONTRIBUTING.md)에 브랜치 모델과 필수 검사가 있습니다. `main`은 룰셋으로 보호되며, 병합은 squash 전용입니다.
+첫 색인이나 검색 때 임베딩 모델을 `~/.redrob/recall/models`에 내려받고, 그 뒤로는 오프라인으로
+동작합니다. CI가 돌리는 게이트:
 
-## 라이선스와 귀속
+```bash
+cargo fmt --all -- --check
+cargo clippy -p redrob-recall -p redrob-recall-core -p redrob-recall-api --all-targets --profile ci -- -D warnings
+cargo test -p redrob-recall-core -p redrob-recall-api --profile ci
+python3 scripts/check-brand.py && python3 scripts/check-version.py
+```
 
-Redrob Recall은 [Apache License 2.0](LICENSE)으로 배포됩니다. [NOTICE](NOTICE)를 보세요. 임베드된 오픈소스 구성요소는 각자의 라이선스를 유지합니다. [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)를 보세요. Qdrant와 Qdrant Edge는 Qdrant Solutions GmbH의 프로젝트이며, Redrob Recall은 Redrob 제품이고 공식 Qdrant 배포판으로 제시하지 않습니다.
+### Qdrant Edge 컴파일러 호환
 
-## 프로젝트 문서
+워크스페이스는 Qdrant Edge 0.8.0을 고정하는데, 이 버전은 Rust 1.95에서 아직 기능 게이트 뒤에 있는
+표준 라이브러리 매크로를 씁니다. `.cargo/config.toml`이 그 크레이트 속성 하나만 좁게 켭니다
+(`RUSTC_BOOTSTRAP`과 `-Zcrate-attr=feature(assert_matches)`). 안정판에서 빌드되는 상류 릴리스와
+함께 제거하고, 범위를 넓히지 마세요.
 
-- [아키텍처와 신뢰 경계](docs/ARCHITECTURE.md)
-- [호환성 매트릭스](docs/compatibility.md) — 무엇이 구현됐고, 행마다 어느 정본이 기준이며, 무엇이 아직 계획인지
-- [정본 소스 고지](UPSTREAM_NOTICES.md)와 [docs/upstream-sources.toml](docs/upstream-sources.toml)의 핀
-- [서명된 릴리스 절차](docs/RELEASING.md)
+## 릴리스
+
+Linux x86_64(`.tar.gz`, `.deb`), Apple 실리콘 macOS(`.dmg`, `.zip`; 서명·공증·스테이플), Windows
+x64(`-portable.zip`, `-setup.exe`; Azure Artifact Signing 코드서명)와 그 옆의 `SHA256SUMS.txt`,
+`redrob-launcher.json`을 `.github/workflows/release.yml`이 만듭니다([릴리스 안내](docs/RELEASING.md)).
+Windows 설치 프로그램은 영어와 한국어를 지원합니다. Intel Mac은 빌드하지 않습니다: `ort-sys`(`fastembed`
+경유)가 `x86_64-apple-darwin`용 ONNX Runtime 바이너리를 내지 않습니다. 자산 이름은 Redrob Launcher가
+설치하는 규칙을 따릅니다.
+
+## 프라이버시
+
+- 폴더 선택, 추출, 분절, 임베딩, 두 검색 모두 기기 안에서 일어납니다.
+- 검색은 아무것도 어디로도 보내지 않습니다.
+- Ask는 질문과 최대 10개의 문단만 보냅니다. 파일 이름, 경로, 파일 전체, 색인은 보내지 않습니다.
+  Settings의 **Send the matching passages to Redrob**를 끄면 차단됩니다.
+- 로컬 API는 127.0.0.1에서만 듣고 토큰 없는 호출을 모두 거부합니다.
+- 분석·텔레메트리 없음.
+
+전체 데이터 흐름과 삭제 절차는 [PRIVACY.md](PRIVACY.md)에 있습니다.
+
+## 라이선스와 출처
+
+Apache License 2.0([LICENSE](LICENSE), [NOTICE](NOTICE)). 내장 구성요소는 각자의 라이선스를
+유지합니다([THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)). 질의 문법은 bloop의 것을 따르고 벡터
+색인은 `qdrant-edge` 크레이트입니다([UPSTREAM_NOTICES.md](UPSTREAM_NOTICES.md),
+[docs/upstream-sources.toml](docs/upstream-sources.toml)). Qdrant와 Qdrant Edge는 Qdrant Solutions
+GmbH의 프로젝트이며, Redrob Recall은 Redrob의 제품이고 공식 Qdrant 배포본이 아닙니다.
+
+## 문서
+
+- [로컬 API](docs/API.md)
+- [아키텍처](docs/ARCHITECTURE.md)
+- [릴리스 절차](docs/RELEASING.md)
 - [백업과 복구](docs/RECOVERY.md)
-- [릴리스 QA 체크리스트](docs/QA_CHECKLIST.md)
-- [프라이버시와 삭제](PRIVACY.md)
-- [보안 정책](SECURITY.md)
-- [체인지로그](CHANGELOG.md)
-- [서드파티 고지](THIRD_PARTY_NOTICES.md)
-
-빌드를 발행하기 전에 전체 로컬 검증을 돌리세요.
-
-```bash
-npm run verify
-```
-
-버전 일관성 검사, 프로덕션 프런트엔드 빌드, JavaScript 의존성 감사, Rust 포매팅, Rust 테스트, 경고를 오류로 취급하는 Clippy를 실행합니다. Linux 호스트에서는 Tauri 네이티브 개발 패키지를 먼저 설치해야 합니다. CI는 잠긴 의존성 그래프에 대해 RustSec 광고 데이터베이스를 별도로 돌립니다.
+- [FTS5를 유지한 이유](docs/index-engine-decision.md)와 [질의 문법](docs/upstream-grammar.md)
+- [프라이버시](PRIVACY.md), [보안](SECURITY.md), [변경 기록](CHANGELOG.md)

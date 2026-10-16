@@ -2,179 +2,138 @@
 
 **English** · [한국어](./README.ko.md)
 
-Redrob Recall is a local-first desktop app for searching folders and asking grounded questions about your files. Files, extracted text, embeddings, and the complete search index stay on the device. Search is free and local. When you use **Ask**, only your question and the few relevant text excerpts are sent to the existing Redrob API; filenames, paths, complete files, and the full index are not sent.
+Redrob Recall is the local memory of the Redrob apps: an embedding and keyword index of the folders
+you choose, built and kept current on your own machine, that Redrob Office, Chat, Code, Canvas and
+the rest can search through one loopback API. It comes with a thin window of its own for adding
+folders, searching, and asking a question whose answer cites your files.
 
-**Everything on your computer, searchable.**
+Files, extracted text, embeddings and the whole index stay on the device. Search is free and local.
+**Ask** sends only your question and the few matching passages to the Redrob console, with the account
+Redrob Launcher signed this computer in with; filenames, paths, whole files and the index are never
+sent.
 
-## What it does
+## What it is
 
-- Indexes selected folders without Docker or a separate database server.
-- Reads PDF, DOCX, TXT, Markdown, RST, CSV, JSON, HTML, XML, and log files.
-- Combines multilingual semantic retrieval with keyword matching.
-- Watches selected folders and updates the local library when files change.
-- Opens or reveals every result in its original location.
-- Produces Redrob answers with numbered citations back to local files.
-- Exposes an optional bearer-authenticated API on loopback only.
+| Part | Where | What it does |
+| --- | --- | --- |
+| `redrob-recall-core` | `crates/redrob-recall-core` | The memory layer as a library: extraction (PDF, DOCX, TXT, Markdown, RST, CSV, JSON, HTML, XML, logs), chunking, SQLite + FTS5 keyword index, local multilingual embeddings in Qdrant Edge, hybrid search, folder watcher, the library store. No window, no network. |
+| `redrob-recall-api` | `crates/redrob-recall-api` | The loopback HTTP API (127.0.0.1, one bearer token) the other Redrob apps call, and a typed Rust client for it. [docs/API.md](docs/API.md). |
+| `redrob-recall` | `apps/redrob-recall` | The desktop window (eframe/egui on wgpu) and the CLI: `serve`, `index <dir>`, `search <query>`. The window serves the API while it is open. |
 
-## Architecture
+Everything lives in `~/.redrob/recall` (`REDROB_RECALL_DATA_DIR` overrides it):
 
-| Layer                       | Implementation                                             |
-| --------------------------- | ---------------------------------------------------------- |
-| Desktop shell               | Tauri 2                                                    |
-| Interface                   | React 19 + TypeScript + Vite                               |
-| Metadata and keyword search | SQLite + FTS5                                              |
-| Vector search               | Qdrant Edge, embedded in-process                           |
-| Local embeddings            | FastEmbed `MultilingualE5Small`, 384 dimensions            |
-| File watching               | `notify`                                                   |
-| Redrob answers              | `POST /chat/completions` on the configured Redrob base URL |
+- `metadata.db`: document metadata, extracted passages and the FTS5 index
+- `qdrant-edge/`: the local vector index
+- `models/`: the downloaded embedding model (`multilingual-e5-small`, 384 dimensions)
+- `local-api-token`, `local-api-address`: how a client on this machine finds and authenticates to the API
+- `backups/`: consistent copies of `metadata.db` ([Backup and recovery](docs/RECOVERY.md))
 
-Application data is stored in `~/.redrob/recall`:
+Original files are never copied into this directory.
 
-- `metadata.db`: document metadata, extracted passages, and FTS data
-- `qdrant-edge/`: local semantic index
-- `models/`: downloaded local embedding model
-- `local-api-token`: generated local API bearer token (`0600` on Unix)
+## The window
 
-Original files are never copied into this directory. Consistent metadata backups are retained under `~/.redrob/recall/backups`; see [Backup and recovery](docs/RECOVERY.md).
+- **Library**: the folders, how many files each holds, the running pass with its progress, Pause /
+  Resume / Check now, Add folder, Remove.
+- **Search**: results ranked by meaning and by keyword together, the matching snippet, Open and
+  Reveal in the file manager. Quoted phrases, `-excluded` words, `heading:word` and `prefix*` work.
+- **Ask**: a question, the console's answer with `[1]`, `[2]` citations, the sources beneath it with
+  Open and Reveal. Needs the shared sign-in; without it the locally found sources are still shown.
+- **Settings**: the answer model, file types and passage size, the local API switch and port, the
+  account status, health check, backup, clear.
 
-## Reliability and recovery
+## Sign-in
 
-Redrob Recall validates its metadata database at startup, applies ordered schema migrations, and creates a pre-migration backup. Documents remain pending until their semantic vectors are committed, so an interrupted index can be repaired on the next scan. Damaged derived indexes are quarantined rather than silently overwritten, and disconnected watched drives are not treated as deleted libraries.
+Recall has no sign-in of its own. Sign in once in [Redrob Launcher](https://github.com/redrob-labs/redrob-launcher/releases/latest)
+and every Redrob app on the computer, Recall included, uses that account: the launcher writes a
+shared `account.json` and Recall reads it (and notices when it changes). A key exported as
+`REDROB_API_KEY`, or an `account.json` of Recall's own in its data folder, wins over the shared one.
+Recall never writes, logs or displays the key.
 
-Use **Settings → Storage** to run a health check or create a manual metadata backup. Backups include extracted passages and paths and should be protected with operating-system full-disk encryption.
-
-## Run for development
-
-### Prerequisites
-
-- Node.js 22 or newer
-- npm 11 or newer
-- Rust 1.95.0 (automatically selected by `rust-toolchain.toml`)
-- Tauri 2 system dependencies for your operating system
-
-Linux package names vary by distribution. A typical Debian/Ubuntu setup needs WebKitGTK 4.1, GTK 3, librsvg, and build essentials:
-
-```bash
-sudo apt update
-sudo apt install -y build-essential curl wget file libwebkit2gtk-4.1-dev \
-  libappindicator3-dev librsvg2-dev libssl-dev patchelf
-```
-
-Install dependencies and run the desktop app:
-
-```bash
-npm install
-npm run tauri dev
-```
-
-Frontend-only demo data is available for visual development:
-
-```bash
-npm run dev
-# Open http://localhost:1420/?demo=1
-```
-
-The first real index or search downloads the multilingual embedding model. After that download, indexing and search work locally without network access.
-
-## Build installers
-
-Unsigned local development bundles can be built with:
-
-```bash
-npm ci
-npm run tauri build
-```
-
-Tauri writes platform bundles under `src-tauri/target/release/bundle/`. Production installers are created only by the reviewed **Signed desktop release** workflow. It requires the external updater and Apple signing secrets documented in [the release guide](docs/RELEASING.md); missing credentials stop the release instead of publishing unsigned artifacts.
-
-Released platforms today are **Linux x64** and **macOS on Apple Silicon**. Windows x64 is built and signed only once a code-signing certificate is configured — until then that leg is skipped deliberately rather than shipping an unsigned installer. Intel Macs are not supported: the embedded ONNX Runtime (`ort-sys`, via `fastembed`) publishes no binary for `x86_64-apple-darwin`.
-
-Published builds check the signed stable update channel from **Settings → Updates**. Update metadata and installer signatures are verified by Tauri before installation. Local development builds intentionally have no update key or endpoint configured.
-
-### Qdrant Edge compiler compatibility
-
-The application pins Qdrant Edge 0.8.0. That release uses a standard-library macro that remains feature-gated in Rust 1.95. `.cargo/config.toml` narrowly enables the required crate attribute using `RUSTC_BOOTSTRAP` and `-Zcrate-attr=feature(assert_matches)`. Remove this workaround when upgrading to an upstream release that builds on stable Rust without it. Do not broaden the enabled feature set.
-
-## Connect Redrob
-
-Ask runs through the shared **Redrob Code** engine on this computer, which holds the Redrob console key for every Redrob app. Install it with [Redrob Launcher](https://github.com/redrob-labs/redrob-launcher/releases/latest); without it the connection panel says so and Ask is unavailable (local indexing and Search still work).
-
-If this computer is already signed in through Redrob Launcher, nothing needs to be pasted: the engine reads that sign-in and the panel shows **Signed in with Redrob Launcher**. Otherwise:
-
-1. Create or select a workspace API key at `https://console.redrob.ai/api-keys`.
-2. Open **Ask** or **Settings → Redrob connection**.
-3. Paste the key. The app hands it to the engine (`PUT /auth/redrob`) and keeps no copy of its own.
-
-Signing out of the launcher's shared sign-in happens in the launcher. A key stored by an earlier version of this app is handed to the engine once and removed from the credential manager.
-
-Local indexing and Search do not require Redrob. Ask uses the workspace and balance associated with the supplied key. This app does not alter Redrob Console.
-
-## Privacy behavior
-
-- Folder selection, extraction, chunking, embedding, keyword search, and semantic search happen on-device.
-- Search never sends a query or result to Redrob.
-- Ask sends the question and up to ten relevant excerpt strings. It does not send filenames, paths, original files, or the complete index.
-- Turning off **Allow Ask to send relevant excerpts** blocks Ask at the backend boundary.
-- No analytics or telemetry SDK is included.
-
-See [PRIVACY.md](PRIVACY.md) for the complete data flow and deletion instructions.
-
-## Local API
-
-The API binds only to `127.0.0.1` and defaults to port `47331`. Every endpoint requires the token stored at `~/.redrob/recall/local-api-token`:
+## Use it from another app
 
 ```bash
 TOKEN="$(cat ~/.redrob/recall/local-api-token)"
+BASE="$(cat ~/.redrob/recall/local-api-address)"   # http://127.0.0.1:47331 by default
 
-curl -H "Authorization: Bearer $TOKEN" \
-  http://127.0.0.1:47331/health
+curl -H "Authorization: Bearer $TOKEN" "$BASE/health"
 
-curl -X POST http://127.0.0.1:47331/v1/search \
-  -H "Authorization: Bearer $TOKEN" \
-  -H "Content-Type: application/json" \
-  -d '{"query":"India launch decision","limit":8,"filters":{"extensions":[],"pathPrefix":null}}'
+curl -X POST "$BASE/v1/search" -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
+  -d '{"query":"India launch decision","limit":8}'
 
-curl -X POST http://127.0.0.1:47331/v1/ask \
-  -H "Authorization: Bearer $TOKEN" \
-  -H "Content-Type: application/json" \
-  -d '{"query":"What did we decide about India?","sourceIds":[],"maxSources":6}'
+curl -X POST "$BASE/v1/ask-context" -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
+  -d '{"query":"What did we decide about India?","maxSources":6}'
 ```
 
-Changing the Local API switch or port takes effect after restarting Redrob Recall. Ask through the local API follows the same privacy setting and Redrob connection requirements as the UI.
+From Rust, depend on `redrob-recall-api` with the `client` feature and call
+`RecallClient::discover()`. [docs/API.md](docs/API.md) has every route.
 
-## Useful commands
+## Run for development
+
+Rust 1.95.0 (selected by `rust-toolchain.toml`). On Linux the window links against the X11/Wayland/GL
+headers egui, wgpu and rfd need:
 
 ```bash
-npm run check                    # TypeScript and locked Rust checks
-npm run check:version            # Ensure all release versions match
-npm run test:rust                # Migration, validation, and API error tests
-npm run verify                   # Full build, audits, formatting, tests, and Clippy
-npm run format                   # Prettier and rustfmt
-npm audit                        # JavaScript dependency audit
-cargo clippy --locked --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings
+sudo apt-get install -y libxkbcommon-dev libwayland-dev libx11-dev libxrandr-dev libxi-dev \
+  libgl1-mesa-dev libgtk-3-dev
 ```
+
+```bash
+cargo run -p redrob-recall                       # the window
+cargo run -p redrob-recall -- serve              # the API alone
+cargo run -p redrob-recall -- index ~/Documents  # index a folder from the terminal
+cargo run -p redrob-recall -- search "budget"
+```
+
+The first index or search downloads the embedding model into `~/.redrob/recall/models`; after that
+everything works offline. The gates CI runs:
+
+```bash
+cargo fmt --all -- --check
+cargo clippy -p redrob-recall -p redrob-recall-core -p redrob-recall-api --all-targets --profile ci -- -D warnings
+cargo test -p redrob-recall-core -p redrob-recall-api --profile ci
+python3 scripts/check-brand.py && python3 scripts/check-version.py
+```
+
+### Qdrant Edge compiler compatibility
+
+The workspace pins Qdrant Edge 0.8.0, which uses a standard-library macro still feature-gated on
+Rust 1.95. `.cargo/config.toml` narrowly enables that one crate attribute (`RUSTC_BOOTSTRAP` plus
+`-Zcrate-attr=feature(assert_matches)`). Remove it together with an upstream release that builds on
+stable; do not widen it.
+
+## Releases
+
+Linux x86_64 (`.tar.gz`, `.deb`), macOS on Apple silicon (`.dmg`, `.zip`; signed, notarized,
+stapled) and Windows x64 (`-portable.zip`, `-setup.exe`; Authenticode through Azure Artifact
+Signing), with `SHA256SUMS.txt` and `redrob-launcher.json` beside them, from
+`.github/workflows/release.yml` ([release guide](docs/RELEASING.md)). The Windows setup speaks English
+and Korean. Intel Macs are not built: `ort-sys` (via `fastembed`) publishes no ONNX Runtime binary for
+`x86_64-apple-darwin`. Asset names are the ones Redrob Launcher installs.
+
+## Privacy
+
+- Folder selection, extraction, chunking, embedding and both searches happen on the device.
+- Search never sends anything anywhere.
+- Ask sends the question and up to ten passages; never filenames, paths, whole files or the index.
+  Turning off **Send the matching passages to Redrob** in Settings blocks it.
+- The local API listens on 127.0.0.1 only and refuses every call without the token.
+- No analytics or telemetry.
+
+[PRIVACY.md](PRIVACY.md) has the complete data flow and deletion steps.
 
 ## Licensing and attribution
 
-Redrob Recall is licensed under the [Apache License 2.0](LICENSE); see [NOTICE](NOTICE). Embedded open-source components retain their own licenses. See [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md). Qdrant and Qdrant Edge are projects of Qdrant Solutions GmbH; Redrob Recall is a Redrob product and is not presented as an official Qdrant distribution.
+Apache License 2.0 ([LICENSE](LICENSE), [NOTICE](NOTICE)). Embedded components keep their own
+licences ([THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)); the query grammar follows bloop's and
+the vector index is the `qdrant-edge` crate ([UPSTREAM_NOTICES.md](UPSTREAM_NOTICES.md),
+[docs/upstream-sources.toml](docs/upstream-sources.toml)). Qdrant and Qdrant Edge are projects of
+Qdrant Solutions GmbH; Redrob Recall is a Redrob product and not an official Qdrant distribution.
 
-## Project documentation
+## Documentation
 
-- [Architecture and trust boundaries](docs/ARCHITECTURE.md)
-- [Compatibility matrix](docs/compatibility.md) — what is implemented, which upstream is the authority for each row, and what is still planned
-- [Upstream source notices](UPSTREAM_NOTICES.md) and the pins in [docs/upstream-sources.toml](docs/upstream-sources.toml)
-- [Signed release process](docs/RELEASING.md)
+- [The local API](docs/API.md)
+- [Architecture](docs/ARCHITECTURE.md)
+- [Release process](docs/RELEASING.md)
 - [Backup and recovery](docs/RECOVERY.md)
-- [Release QA checklist](docs/QA_CHECKLIST.md)
-- [Privacy and deletion](PRIVACY.md)
-- [Security policy](SECURITY.md)
-- [Changelog](CHANGELOG.md)
-- [Third-party notices](THIRD_PARTY_NOTICES.md)
-
-Before publishing a build, run the full local verification command:
-
-```bash
-npm run verify
-```
-
-This runs version consistency checks, the production frontend build, JavaScript dependency audit, Rust formatting, Rust tests, and Clippy with warnings treated as errors. Linux hosts must have the Tauri native development packages installed first. CI separately runs the RustSec advisory database against the locked dependency graph.
+- [Why FTS5 stayed](docs/index-engine-decision.md) and [the query grammar](docs/upstream-grammar.md)
+- [Privacy](PRIVACY.md), [Security](SECURITY.md), [Changelog](CHANGELOG.md)

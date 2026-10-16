@@ -1,159 +1,81 @@
 # Release Guide
 
-Redrob Recall releases are built as signed native installers by
-`.github/workflows/release.yml`. A pushed `vMAJOR.MINOR.PATCH` tag creates or updates a
-**draft** GitHub Release. Publishing that draft is the release: GitHub Releases is the
-update channel itself, so there is no separate promotion step and no CDN.
+Redrob Recall releases are built by `.github/workflows/release.yml`, the redrob-canvas release shape:
+exactly three targets from the one cargo binary `redrob-recall`, signed where the platform expects it,
+and published as `latest` by the shared redrob-labs publish job. GitHub Releases is the channel;
+Redrob Launcher reads `SHA256SUMS.txt` and `redrob-launcher.json` from it to install and update the
+app. Recall has no updater of its own.
 
-Production builds check
-`https://github.com/redrob-labs/redrob-recall/releases/latest/download/latest.json`. That
-path resolves to the newest **published, non-prerelease** release, which is what makes the
-draft gate real — a draft is not "latest", so no installed client can see a version until a
-named owner publishes it.
+| Target | Assets |
+| --- | --- |
+| Linux x86_64 | `redrob-recall-<v>-linux-x86_64.tar.gz`, `.deb` |
+| macOS arm64 | `redrob-recall-<v>-macos-arm64.zip`, `.dmg` (Developer ID, notarized, stapled) |
+| Windows x64 | `redrob-recall-<v>-windows-x64-portable.zip`, `-setup.exe` (Azure Artifact Signing) |
 
-## One-time signing setup
+Plus `LICENSE`, `NOTICE`, `THIRD_PARTY_NOTICES.md`, `UPSTREAM_NOTICES.md`, `SHA256SUMS.txt` and
+`redrob-launcher.json` (`{ "schema": 1, "sharedAccount": true }`). Intel macOS is not built: `ort-sys`
+publishes no ONNX Runtime binary for it. `tools/release_matrix.py` is the one list of legs; the
+Windows leg is skipped (with a notice) unless the repository variable `WINDOWS_SIGNING_READY` is `true`.
 
-Generate the Tauri updater signing key pair on a trusted, encrypted administrator machine:
+## Steps
 
-```bash
-npm run tauri signer generate -- -w ~/.tauri/redrob-recall.key
-```
+1. On a `release/<version>` branch from `develop`: set `version` in the root `Cargo.toml`
+   (`[workspace.package]`), turn the CHANGELOG's section into `## <version> - <date>`, run
+   `python3 scripts/check-version.py`. Open the pull request into `develop`; CI's `checks` job runs
+   the same script.
+2. Merge it. Open the promotion pull request `develop` -> `main` and merge it with a merge commit.
+3. Tag the merge commit on `main` and push the tag with an explicit refspec:
 
-Back up the private key and its password in the Redrob secrets manager. Losing it prevents
-installed copies from trusting future updates. Never put private keys, certificates,
-passwords, or `.env` files in this repository.
+   ```bash
+   git fetch origin main
+   git tag v<version> origin/main
+   git push origin refs/tags/v<version>:refs/tags/v<version>
+   ```
 
-Create a protected GitHub Environment named `production-release` and configure required
-reviewers or equivalent deployment protection. The build job runs inside it and consumes
-these **organization** secrets and variables — they are inherited by name, and the same set
-is shared with the other Redrob desktop products:
+   The tag push starts the release. `gh workflow run release.yml --ref main -f tag=v<version>` runs
+   the same release by hand; `gh workflow run release.yml --ref <branch> -f dry_run=true` builds and
+   signs the dispatched ref and publishes nothing.
+4. Watch the run; the `publish` job's output is the release URL. Open the back-merge pull request
+   `main` -> `develop` (the shared gitflow workflow opens one itself when `main` is ahead).
 
-| Name | Kind | Purpose |
+`validate` refuses a tag that is not on `main`, does not equal the workspace version, or has no dated
+CHANGELOG section; then it runs the brand check and `cargo fmt --check`. Clippy and the tests ran on
+the pull request and are not repeated.
+
+## What is shared and what is this repository's
+
+| Piece | Where | What it does here |
 | --- | --- | --- |
-| `TAURI_SIGNING_PUBLIC_KEY` | variable | Public updater verification key embedded into release builds |
-| `TAURI_SIGNING_PRIVATE_KEY` | secret | Private updater artifact signing key |
-| `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` | secret | Updater key password |
-| `APPLE_CODESIGN_CERT_P12_BASE64` | secret | Base64-encoded Developer ID Application `.p12` |
-| `APPLE_CODESIGN_CERT_PASSWORD` | secret | Password for the exported Apple certificate |
-| `APPLE_NOTARY_API_KEY_ID` | secret | App Store Connect API key id used for notarization |
-| `APPLE_NOTARY_API_ISSUER_ID` | secret | App Store Connect issuer id |
-| `APPLE_NOTARY_API_KEY_P8_BASE64` | secret | Base64-encoded `.p8` private key, written to the runner temp only |
-| `WIN_CSC_LINK` | secret | Windows PFX as raw Base64, a `data:*;base64,...` URI, or an HTTPS download URL |
-| `WIN_CSC_KEY_PASSWORD` | secret | Password for the Windows PFX |
+| `gitflow.yml` (reusable) | `.github/workflows/gitflow.yml` calls it | Branch names are `<type>/<slug>`; `main` is contained in `develop`, else the back-merge pull request is opened |
+| `pr-policy.yml` (reusable) | `.github/workflows/pr-policy.yml` calls it | Open pull request limits and the self-review rule |
+| `actions/sign-windows` | the Windows leg | Authenticode through Azure Artifact Signing for the executable, the uninstaller and the setup |
+| `release-publish.yml` (reusable) | the `publish` job | Downloads the `release-*` artifacts, writes `SHA256SUMS.txt` and `redrob-launcher.json`, creates and publishes the release |
 
-Notarization uses the App Store Connect **API key**, not an Apple ID and app-specific
-password. The Windows import rejects every other `WIN_CSC_LINK` form and requires a
-currently valid certificate with a private key, the Code Signing extended key usage, and a
-trusted non-revoked chain. After packaging, CI verifies every NSIS/MSI Authenticode
-signature, signer thumbprint, and timestamp before the tag workflow can succeed. Apple
-Developer ID signing and notarization remain required for macOS.
+Everything else lives here: `tools/release_matrix.py` (the legs), `tools/release/stage.py` (the
+staging tree and the macOS bundle), `tools/release/make_deb.py`, `installer/macos/make-dmg.sh` (the
+disk image with the uninstaller), `installer/windows/build.py` (the bilingual setup).
 
-Windows is only built when the repository variable `WINDOWS_SIGNING_READY` is `"true"`. Until
-then the leg is skipped with a notice in the run log rather than failing every tag, and no
-unsigned Windows installer is produced — the omission is deliberate and visible, not a silent
-downgrade. Setting that variable, once `WIN_CSC_LINK` holds a usable certificate, is the whole
-re-enable step.
+## Signing
 
-macOS Intel is not built at all. `ort-sys`, reached through `fastembed`, publishes no prebuilt
-ONNX Runtime for `x86_64-apple-darwin`, so the leg fails after compiling the entire dependency
-tree. Restoring it would mean building and vendoring `libonnxruntime` for a platform Apple no
-longer sells.
+The build legs run in the GitHub Environment `release`; the name is part of the organization's Azure
+federated credential (`repo:redrob-labs/redrob-recall:environment:release`). The organization secrets
+they consume:
 
-No CDN credential is involved. The CDN promotion step was removed along with the CDN
-itself; the release consumes only the signing material above plus the run's own
-`GITHUB_TOKEN`.
+| Name | Purpose |
+| --- | --- |
+| `APPLE_CODESIGN_CERT_P12_BASE64`, `APPLE_CODESIGN_CERT_PASSWORD` | Developer ID Application certificate, imported into a throwaway keychain |
+| `APPLE_NOTARY_API_KEY_ID`, `APPLE_NOTARY_API_ISSUER_ID`, `APPLE_NOTARY_API_KEY_P8_BASE64` | App Store Connect API key for `notarytool` |
+| `AZURE_CLIENT_ID`, `AZURE_TENANT_ID`, `AZURE_SUBSCRIPTION_ID` | The identity `azure/login` exchanges the job's OpenID Connect token for (plain ids) |
+| `ARTIFACT_SIGNING_ENDPOINT`, `ARTIFACT_SIGNING_ACCOUNT`, `ARTIFACT_SIGNING_CERT_PROFILE` | The Azure Artifact Signing account and certificate profile |
 
-The workflow verifies that release commits are reachable from `origin/main`, requires
-`npm run verify` and the pinned RustSec audit to pass, serializes matrix builds to prevent
-concurrent `latest.json` updates, and refuses missing signing configuration rather than
-publishing unsigned artifacts. Release configuration is generated only inside the runner as
-`src-tauri/tauri.release.conf.json`, which is ignored by Git.
+Windows: build, then `azure/login` (the token is short-lived and the build is long), then sign the
+executable BEFORE it is zipped; the uninstaller is built and signed, embedded with the zip into the
+setup, and the setup is signed. There is no certificate file and no client secret anywhere. macOS:
+sign with the hardened runtime, notarize, staple, and Gatekeeper-assess the app, then the disk image
+in its own right.
 
-Tauri requires signed updater artifacts and describes the key model in its
-[official updater guide](https://v2.tauri.app/plugin/updater/). Apple certificate and
-notarization setup is covered by the
-[Tauri macOS signing guide](https://v2.tauri.app/distribute/sign/macos/).
+## Local rehearsal
 
-## Asset names
-
-Redrob Launcher installs a release asset only when its name is
-`redrob-recall-<version>-<os>-<arch>.<ext>` — for example
-`redrob-recall-0.2.1-linux-x86_64.AppImage`, `redrob-recall-0.2.1-macos-aarch64.dmg`,
-`redrob-recall-0.2.1-windows-x64.msi`. Tauri's bundler writes `Redrob Recall_0.2.1_amd64.AppImage`,
-which the launcher cannot parse, so each build leg renames what it uploaded
-(`scripts/rename-release-assets.mjs`, a PATCH on the asset: same bytes, same id, so updater
-signatures stay valid) and repoints `latest.json` at the new names. The updater is not affected:
-clients follow the URLs in `latest.json`, never a file name. The `verify-release-assets` job then
-fails the run unless every asset parses and every built leg left an installable one
-(`scripts/check-release-asset-names.mjs`); the naming rules themselves live in
-`scripts/release-asset-names.mjs` and are unit-tested.
-
-## Cut a release
-
-1. Update `CHANGELOG.md`.
-2. Set the same semantic version in `package.json`, `src-tauri/Cargo.toml`, and
-   `src-tauri/tauri.conf.json`.
-3. Run:
-
-   ```bash
-   npm ci
-   npm run verify
-   ```
-
-4. Merge the reviewed release change into `main`.
-5. Create and push the matching numeric release tag:
-
-   ```bash
-   git tag -s v0.1.0 -m "Redrob Recall v0.1.0"
-   git push origin v0.1.0
-   ```
-
-6. Watch **Signed desktop release**. Its `Resolve the release matrix` step prints exactly which
-   platforms this run builds — Linux x64 and macOS Apple Silicon today, plus Windows x64 when
-   `WINDOWS_SIGNING_READY` is set. It signs the updater bundles and uploads every file plus
-   `latest.json` to a **draft** GitHub Release.
-7. The `verify-release-assets` job then fails the run unless the draft carries `latest.json`,
-   an installer for every platform that was built, and a manifest whose version matches the tag
-   and whose every platform entry is signed and points at this repository's own release assets.
-   A manifest whose URLs point anywhere else is the silent-freeze failure this job exists to
-   catch. It also rewrites those URLs from the REST asset form `tauri-action` must use on a
-   draft into the published `releases/download/<tag>/<name>` form clients will actually fetch.
-8. Keep the release a draft. Download those exact assets and complete
-   `docs/QA_CHECKLIST.md` on clean machines. Draft assets are not reachable through
-   `releases/latest/download/...`, so no installed client sees them.
-9. Confirm native signatures, updater signatures, checksums, release notes, and QA
-   evidence. A named release owner then publishes the non-prerelease GitHub Release, and
-   that publication is what makes the version live.
-
-## Acceptance after publishing
-
-- `https://github.com/redrob-labs/redrob-recall/releases/latest/download/latest.json`
-  returns the approved version and a signed key for every platform the run built.
-- Every platform URL is anonymously reachable with GET and returns the exact approved size
-  and SHA-256 bytes — the same bytes QA downloaded from the draft.
-- A previous production build detects, verifies, installs, and relaunches into the new
-  version on every platform.
-
-Assets are immutable by construction: GitHub does not let a published release asset be
-replaced with different bytes under the same name, so there is no cache policy to configure
-and no versioned-key contract to enforce.
-
-## Rollback and key rotation
-
-Never replace a bad release under the same version. If a bad version reached clients, fix
-the issue, increment the patch version, repeat draft QA, and publish the newer signed
-release. Tauri rejects downgrades by default, so pointing the channel at an older release is
-not a supported rollback — unpublishing the bad release (returning it to draft) is what
-removes it from `latest`.
-
-Updater key rotation requires a transition release trusted by the existing key. Treat
-suspected key compromise as a security incident and follow `SECURITY.md` before shipping
-anything else.
-
-## Reproducibility and provenance
-
-CI installs JavaScript dependencies with `npm ci`, Rust dependencies with `--locked`, and
-pins every third-party GitHub Action to a full commit SHA. Native signatures and
-notarization timestamps intentionally make installer bytes non-reproducible. Source
-revision, workflow run, version tag, GitHub Release ID, and uploaded installer signatures
-form the release audit trail.
+`tools/release/build-linux.sh` builds the Linux leg here (release build, stage, tar.gz, deb,
+checksums), which is what to run before cutting a release on a machine with the Linux headers.
+`gh workflow run release.yml --ref <branch> -f dry_run=true` rehearses every leg on the runners.

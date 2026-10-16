@@ -28,8 +28,9 @@ Two long-lived branches. `develop` is where work lands; `main` is what has been 
   open pull requests back into it. Clone the repository and you are on `develop`.
 - **`main`** is the released state. It takes pull requests only from `release/*` and `hotfix/*`
   branches, and release tags are cut from it. Nothing else merges here.
-- **Working branches** are `<type>/<short-slug>` off `develop`, e.g. `fix/index-restart`, `feat/pdf-extract`. Types: `feat`,
-  `fix`, `chore`, `docs`, `test`, `refactor`, `perf`.
+- **Working branches** are `<type>/<short-slug>` off `develop`, e.g. `fix/index-restart`, `feat/pdf-extract`. Types are the
+  redrob-labs org list, checked by the shared `gitflow` workflow: `feat`, `fix`, `chore`, `docs`, `test`,
+  `refactor`, `perf`, `ci`, `build`, `sync`, `hotfix`, `release`.
 - **Merging is squash-only**, and the branch is deleted on merge. One pull request becomes one
   commit, so `git log develop` reads as a list of changes rather than a graph. The squash commit's
   body is the pull request body, not a concatenation of your work-in-progress messages.
@@ -75,13 +76,10 @@ need write access to contribute, and pull requests from forks run CI with no rep
 git switch develop && git pull
 git switch -c fix/short-description
 
-npm install
-npm run check
-npm run build
-
 cargo fmt --all
-cargo clippy --all-targets -- -D warnings
-cargo test --workspace
+cargo clippy -p redrob-recall -p redrob-recall-core -p redrob-recall-api --all-targets --profile ci -- -D warnings
+cargo test -p redrob-recall-core -p redrob-recall-api --profile ci
+python3 scripts/check-brand.py && python3 scripts/check-version.py
 
 # open a pull request into develop
 ```
@@ -97,24 +95,22 @@ device, say so in the body rather than only in the diff.
 
 ## What CI checks
 
-Both `ci.yml` jobs are required before a merge, and neither consumes a secret, so a pull request from
-a fork gets the same run as one from a branch here:
+`ci.yml` is the one pull-request workflow, and neither job consumes a secret, so a pull request from a
+fork gets the same run as one from a branch here:
 
 | Check | What it runs |
 | --- | --- |
-| **Verify source and desktop core** | `npm ci` then `npm run verify` — the full build, formatting, tests and Clippy |
-| **Rust security advisories** | `cargo audit` against the locked dependency set |
+| **brand pins, version** | `scripts/check-brand.py` (every icon and lockup is byte-identical to what the design system pins say) and `scripts/check-version.py` (the workspace version has its dated CHANGELOG section); seconds |
+| **fmt, clippy, test (profile ci)** | `cargo fmt --check`, `cargo clippy ... -D warnings` and the tests of our three crates with `--profile ci`; skipped when no Rust input changed or when the pull request targets `main` |
 
-The advisory scan reads a database that changes daily, so it can go red on a branch that changed no
-dependencies; check the same job on `develop` before assuming it is yours. When it is a real finding,
-bump the crate rather than allowing the advisory.
-
-**`release.yml`** builds and publishes on a tag. It is maintainer-only by construction: it fires on
-`push: tags`, verifies the tag commit is an ancestor of `main`, and puts the credentialed jobs behind
-the `production-release` environment. That ancestor check is what makes the branch model real — a tag
+**`release.yml`** builds and publishes on a tag (or `workflow_dispatch` with the tag). It is
+maintainer-only by construction: it verifies the tag commit is an ancestor of `main` and puts the
+credentialed jobs behind the `release` environment. Windows signing and the publish step are the
+shared redrob-labs workflows (`redrob-labs/.github`); `workflow_dispatch` with `dry_run` builds and
+signs and publishes nothing. That ancestor check is what makes the branch model real — a tag
 cut from `develop` is refused rather than shipped.
 
-Run `npm run check` and `cargo test --workspace` before pushing.
+Run the four commands above before pushing.
 
 ## Dependency updates
 
@@ -124,9 +120,8 @@ replace them:
 
 - **Dependabot security updates are on.** A dependency with a known advisory still gets a pull
   request opened automatically. That is the part worth interrupting for.
-- **The advisory job gates every pull request.** `cargo audit` runs against the committed
-  lockfile, so a vulnerable dependency cannot merge even if nobody read an alert. A security
-  update is a notification; this is the control.
+- **`cargo audit` runs before a release.** CI stays thin (one scripts job, one Rust job), so
+  dependency advisories are checked once against the lockfile before the release cut.
 
 Routine bumps are therefore deliberate: bump what you need for the change you are making, in the
 same pull request, and say why in the body. Do not sweep unrelated versions into a feature branch.

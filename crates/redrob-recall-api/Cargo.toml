@@ -1,0 +1,34 @@
+# SPDX-License-Identifier: Apache-2.0
+
+[package]
+name = "redrob-recall-api"
+description = "Redrob Recall's loopback HTTP API (bearer token, 127.0.0.1 only) and the typed Rust client the other Redrob apps call"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+repository.workspace = true
+authors.workspace = true
+publish = false
+
+[lints]
+workspace = true
+
+[features]
+default = ["server", "client"]
+# The axum server: what `redrob-recall serve` and the desktop app run.
+server = ["dep:axum", "dep:redrob-recall-core", "dep:tokio", "dep:uuid"]
+# The reqwest client: what another Redrob app depends on to reach a running Recall.
+client = ["dep:reqwest"]
+
+[dependencies]
+anyhow.workspace = true
+axum = { workspace = true, optional = true }
+redrob-recall-core = { workspace = true, optional = true }
+reqwest = { workspace = true, optional = true }
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+tokio = { workspace = true, optional = true }
+tracing.workspace = true
+uuid = { workspace = true, optional = true }

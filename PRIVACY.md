@@ -35,11 +35,11 @@ Ask is disabled unless the privacy setting **Allow Ask to send relevant excerpts
 
 The app does not include file paths, filenames, complete files, unrelated passages, embeddings, or the full index in that request. Returned answers, usage counts, model name, and latency are displayed in the current session.
 
-The request is sent to the Redrob Code engine on this computer (`127.0.0.1`, the daemon's `/v1/chat/completions` route, labelled `x-redrob-app: recall`), which applies its privacy settings and forwards it to Redrob. Processing by Redrob is governed by the terms and privacy commitments for your Redrob workspace.
+The request is sent to the Redrob console (`{apiBaseUrl}/chat/completions`, labelled `x-redrob-app: recall`) with the workspace key Redrob Launcher signed this computer in with (its shared `account.json`; `REDROB_API_KEY` or Recall's own `account.json` win over it). Recall never writes, logs or displays that key. Processing by Redrob is governed by the terms and privacy commitments for your Redrob workspace.
 
 ### Application updates
 
-Signed production builds contact the configured GitHub Releases endpoint when you select **Check for updates**. The request includes normal HTTP metadata and the app's current version, operating system, and CPU architecture through the updater URL contract. It does not include files, paths, excerpts, searches, API keys, or the local API token. Downloaded updates must pass Tauri signature verification before installation. Development builds do not configure an updater endpoint.
+Redrob Recall does not check for updates on its own. Redrob Launcher reads this repository's GitHub Releases (`SHA256SUMS.txt`, `redrob-launcher.json`) and installs updates; that request carries normal HTTP metadata and nothing about your files.
 
 ### Model download
 
@@ -55,7 +55,7 @@ The application does not include an analytics, advertising, crash-reporting, or 
 
 ## Delete local data
 
-- **Settings → Clear local index** removes searchable metadata, passages, and vectors but does not modify original files, watched-folder settings, or previously created backups.
+- **Settings → Maintenance → Clear the index** removes searchable metadata, passages, and vectors but does not modify original files, watched-folder settings, or previously created backups.
 - **Disconnect Redrob** removes the key from the Redrob Code engine. It does not remove Redrob Launcher's shared sign-in; sign out in the launcher for that.
 - To remove all app data, quit Redrob Recall and delete `~/.redrob/recall`.
 

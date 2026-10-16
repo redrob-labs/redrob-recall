@@ -1,0 +1,48 @@
+{
+  "//": "Written by scripts/build-brand-assets.py; checked by scripts/check-brand.py. Do not edit.",
+  "design_system": "redrob-design-system (the published distribution)",
+  "sources": {
+    "assets/Products/redrob-desk-icon.svg": "56e78863965320226c56cac3eeaf48923032fcb9f30ccd9ac070bf52ec573515",
+    "assets/Logos/redrob-logo-primary.png": "08ebbff1bf720d22fd9fdf60d0b31163276b27a5cc9deeb8358ae35e4f618df4",
+    "assets/Logos/redrob-logo-primary-white.png": "aefab23bcb9f9184e08775ebad80768039d9187e370e67b73b1b124a7613c7a8",
+    "assets/Products/redrob-browser-lockup-white.png": "c63bad2a52944e64deafbeda48467f8e2fd88f9ab8266dba6ab8a6e94328553c",
+    "fonts/Pretendard-SemiBold.woff2": "837b16488ab5264761a8e8bf871ec1be16a2997d157ace3cc7355d0a809d8639",
+    "tokens.css": "846a49dab8397554f1fb2505252de675ab2964cbfd44e6f3a6e03b17bd961ba9",
+    "tokens.json": "293992b26a5362e0f5f3fcb5ae553479cd97d897c08fb1bf5dbfac9cbde96a9d"
+  },
+  "symbol_element_sha256": "58c6689f4bf71e9740a5e9c68b9932741898666ab9618555a2c0d0f68ec0049a",
+  "tokens": {
+    "product-desk": "#d87101",
+    "redrob-black": "#0a0b0c",
+    "ink-primary": "#0a0b0c"
+  },
+  "product_band": {
+    "band": "desk",
+    "tile": "#d87101",
+    "why": "20-color.md closes the product spectrum at seven; 10-logo.md ships a new product in the band it fits, and Recall's job (your own files on your own machine) is Desk's."
+  },
+  "owned_dirs": [
+    "resources/icons",
+    "resources/brand"
+  ],
+  "outputs": {
+    "installer/macos/res/icon.png": "afd137a3ba08d2e18b880da8eacbd8a63075ab11ca6adfa21a8cb3c1a2581a2e",
+    "installer/windows/res/icon.png": "afd137a3ba08d2e18b880da8eacbd8a63075ab11ca6adfa21a8cb3c1a2581a2e",
+    "installer/windows/res/lockup.png": "43cdd67f70f65ac55d9e66eab8248ff5c8503ad0524fafd42d3392968c3a100b",
+    "resources/brand/redrob-recall-icon-small.svg": "05ac0c1bf86a79016b89d4f0c2b37c2601a5b59eea78273b566849d1544f790b",
+    "resources/brand/redrob-recall-icon.svg": "5dc83c43e35f6363188946741afc13ae24006a21198e82eaf7955b99f5b30aad",
+    "resources/brand/redrob-recall-lockup-white.png": "37b1d90cbbe3233a30a8417baba087a3fed583857cb6a4fabbaafc61018da0ba",
+    "resources/brand/redrob-recall-lockup.png": "1f80260ef7af8c82f20e138db2bbc8ef2a4d8c59ea782d7490c57c3d418df74a",
+    "resources/brand/redrob-recall-splash.png": "acc366d641da309f4a72719dce519ebffc9bd6564bcadd75acc5dcc021dbbb53",
+    "resources/icons/hicolor/128x128/apps/redrob-recall.png": "2c34e3451fc5fa02a04e1039924ca08176663164a7a39627409f75ce1f1bc7b3",
+    "resources/icons/hicolor/16x16/apps/redrob-recall.png": "7b5b515a06b02e9bc8e03011bfaf6feeed4cb41f809d57f06f433c443f7c3ad5",
+    "resources/icons/hicolor/256x256/apps/redrob-recall.png": "afd137a3ba08d2e18b880da8eacbd8a63075ab11ca6adfa21a8cb3c1a2581a2e",
+    "resources/icons/hicolor/32x32/apps/redrob-recall.png": "835c07d51f531f781b21aa3e3721709a143cb5b8b136f015a6ec43a32cc10ec1",
+    "resources/icons/hicolor/48x48/apps/redrob-recall.png": "54288e29621a2ca916235d7b868553bca07905eb8e696dca7fd16cc44e76e223",
+    "resources/icons/hicolor/512x512/apps/redrob-recall.png": "8a9190e303477cc11cf76f7f5e397e8f1f10388fefb265f498971f515c013418",
+    "resources/icons/hicolor/64x64/apps/redrob-recall.png": "bf8cad7010bd8615d6c27545b39c63b31321bc125abc15ab3b70309d04c3386e",
+    "resources/icons/redrob-recall.icns": "291c1d3809cacad552354656b909ad08fb2bf7e37fac25fd9b117cc8d8492be0",
+    "resources/icons/redrob-recall.ico": "c1b80da03c9a8f41d2d24de675f7d6ddedf720fba8ef97c3dc27a18a55a63de6",
+    "resources/icons/redrob-recall.svg": "5dc83c43e35f6363188946741afc13ae24006a21198e82eaf7955b99f5b30aad"
+  }
+}

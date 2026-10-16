@@ -3,7 +3,8 @@
 # Same schema as redrob-canvas and redrob-query, deliberately: three products read from upstream
 # authorities and they should not each invent their own vocabulary for it.
 #
-# `kind` is the load-bearing field, and scripts/verify-upstream.mjs checks it:
+# `kind` is the load-bearing field (the Node validator that checked it went with the web shell; keep
+# the record current by hand):
 #
 #   code       Source code is COPIED into this repository, file by file. The upstream licence
 #              therefore binds our distribution. Every such source needs an attribution entry in
@@ -73,7 +74,7 @@ license = "Apache-2.0"
 #
 # It was `[qdrant]` with `minimum_version = "1.12"` and `kind = "library"`. Three things wrong:
 #
-#   * WRONG ARTEFACT. We do not embed the Qdrant server. src-tauri/Cargo.toml depends on the
+#   * WRONG ARTEFACT. We do not embed the Qdrant server. Cargo.toml depends on the
 #     `qdrant-edge` CRATE, which is a different artefact published to crates.io.
 #   * WRONG VERSION. 1.12 is the server's version line. Cargo.lock pins qdrant-edge 0.8.0, and Cargo
 #     pins it EXACTLY (`=0.8.0`), so a `minimum_version` floor also misdescribed how it is pinned.

@@ -1,38 +1,24 @@
-# Dependencies and builds
-node_modules/
-dist/
-src-tauri/target/
+target/
+*.user
+.DS_Store
+Thumbs.db
+.env
+.env.*
+!.env.example
+.tasks/
+.agents/tasks/
+__pycache__/
+*.py[cod]
 
-# Local application data
+# Local application data a dev run may leave beside the repo
 .redrob-recall/
 *.db
 *.db-shm
 *.db-wal
-
-# Sandbox-only native package shims
-.pkgconfig/
-
-# Tooling and plans
-.tasks/
-.agents/tasks/
-
-# Environment and editor files
-.env
-.env.*
-!.env.example
-src-tauri/tauri.release.conf.json
+*.log
 *.p12
 *.pfx
 *.key
 *.cer
-.DS_Store
-Thumbs.db
 .vscode/
 .idea/
-
-# Logs
-*.log
-npm-debug.log*
-e2e/screenshots/
-e2e/tauri-driver.log
-e2e-home/
