@@ -12,8 +12,10 @@ app. Recall has no updater of its own.
 | macOS arm64 | `redrob-recall-<v>-macos-arm64.zip`, `.dmg` (Developer ID, notarized, stapled) |
 | Windows x64 | `redrob-recall-<v>-windows-x64-portable.zip`, `-setup.exe` (Azure Artifact Signing) |
 
-Plus `LICENSE`, `NOTICE`, `THIRD_PARTY_NOTICES.md`, `UPSTREAM_NOTICES.md`, `SHA256SUMS.txt` and
-`redrob-launcher.json` (`{ "schema": 1, "sharedAccount": true }`). Intel macOS is not built: `ort-sys`
+Plus `LICENSE`, `NOTICE`, `THIRD_PARTY_NOTICES.md`, `UPSTREAM_NOTICES.md`, `SHA256SUMS.txt`,
+`redrob-recall.png` (the 512 px icon, which Redrob Launcher shows in its catalog) and
+`redrob-launcher.json` (`{ "schema": 1, "sharedAccount": true, "icon": "redrob-recall.png" }`), the
+last two written by `tools/release_manifest.py` in the Linux leg and checked by the verify job. Intel macOS is not built: `ort-sys`
 publishes no ONNX Runtime binary for it. `tools/release_matrix.py` is the one list of legs; the
 Windows leg is skipped (with a notice) unless the repository variable `WINDOWS_SIGNING_READY` is `true`.
 
@@ -49,9 +51,10 @@ the pull request and are not repeated.
 | `gitflow.yml` (reusable) | `.github/workflows/gitflow.yml` calls it | Branch names are `<type>/<slug>`; `main` is contained in `develop`, else the back-merge pull request is opened |
 | `pr-policy.yml` (reusable) | `.github/workflows/pr-policy.yml` calls it | Open pull request limits and the self-review rule |
 | `actions/sign-windows` | the Windows leg | Authenticode through Azure Artifact Signing for the executable, the uninstaller and the setup |
-| `release-publish.yml` (reusable) | the `publish` job | Downloads the `release-*` artifacts, writes `SHA256SUMS.txt` and `redrob-launcher.json`, creates and publishes the release |
+| `release-publish.yml` (reusable) | the `publish` job | Downloads the `release-*` artifacts, writes `SHA256SUMS.txt`, creates and publishes the release (`launcher_manifest: false`: the manifest with the icon is this repository's) |
 
-Everything else lives here: `tools/release_matrix.py` (the legs), `tools/release/stage.py` (the
+Everything else lives here: `tools/release_matrix.py` (the legs), `tools/release_manifest.py` (the
+launcher manifest and icon), `tools/release/stage.py` (the
 staging tree and the macOS bundle), `tools/release/make_deb.py`, `installer/macos/make-dmg.sh` (the
 disk image with the uninstaller), `installer/windows/build.py` (the bilingual setup).
 

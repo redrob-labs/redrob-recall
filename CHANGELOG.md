@@ -2,6 +2,23 @@
 
 All notable changes to Redrob Recall are documented here.
 
+## 0.5.0 - unreleased
+
+### Changed
+
+- **The window is redesigned in the Redrob Canvas shape.** A top bar with the app name, the view tabs (Library, Search, Ask, Settings; Ctrl+1..4), a Library menu (Add folder…, Check now, Pause / Resume) and a Help menu (Language, Theme, Shortcuts, About), and a right slot with the account chip ("Signed in with Redrob Launcher" / Connect), the indexing chip and the messages toggle. The left panel is the library tree: every folder with its document count and its index state (ready, indexing, failures, missing); picking one scopes Search to it. The right dock (Ctrl+Shift+M) lists the status history and the files the indexer could not read, with their errors, in place of modal dialogs. The bottom status line carries the live progress (files done / total, the current file) with Pause / Resume.
+- **One theme, set once.** The Redrob Canvas colour and spacing tokens, light or dark, following the operating system with a Help > Theme override; Inter and JetBrains Mono are bundled (SIL OFL 1.1) and the system's CJK font is merged once at start-up as the fallback. Panels draw with the panel fill and a 1 px border; cards replace the stock group frames.
+- **Search as you type.** The box is focused at launch and on Ctrl+K; a search starts 250 ms after the last keystroke. A result row is the title, the page and heading, the path ellipsized to one line (the whole path on hover), the keyword snippet with the matches in the accent colour and the score. ↑ / ↓ move between results, Enter opens the selected file, Ctrl+Enter reveals it in the file manager, Esc clears; double-click opens.
+- **Ask citations jump.** The answer's `[n]` citations are buttons: one click scrolls to source n, highlights it and opens the file. The sources list and the not-signed-in notice are cards beneath.
+- **Settings is one page** -- account, answer model, index (embedding model, file types, skipped folders, largest file, passage size and overlap), library location, local API, appearance (language, theme) -- with Apply and Reset; maintenance (check health, back up, clear the index) beneath.
+- **First run** shows one primary action, Add folder, and accepts a folder dropped onto the window (a drop target is drawn while a folder hovers).
+- **Korean.** Every string in the window is drawn through the interface language: English or Korean, following Redrob Launcher's shared `language.json`, else the operating system, with a Help > Language override kept in `ui.json` beside the library. Help > Shortcuts lists the keys.
+
+### Added
+
+- The release uploads `redrob-recall.png` (the 512 px icon) and names it in `redrob-launcher.json` (`"icon": "redrob-recall.png"`, schema 1), so Redrob Launcher's catalog shows this release's own icon. `tools/release_manifest.py` writes both in the Linux leg and checks them before the release is published.
+- `Library::failed_documents` in `redrob-recall-core`: the documents the last pass could not read, newest first, with their errors. The loopback API is unchanged.
+
 ## 0.4.0 - 2026-10-16
 
 ### Changed

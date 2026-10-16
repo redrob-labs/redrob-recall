@@ -32,14 +32,25 @@ Original files are never copied into this directory.
 
 ## The window
 
-- **Library**: the folders, how many files each holds, the running pass with its progress, Pause /
-  Resume / Check now, Add folder, Remove.
-- **Search**: results ranked by meaning and by keyword together, the matching snippet, Open and
-  Reveal in the file manager. Quoted phrases, `-excluded` words, `heading:word` and `prefix*` work.
-- **Ask**: a question, the console's answer with `[1]`, `[2]` citations, the sources beneath it with
-  Open and Reveal. Needs the shared sign-in; without it the locally found sources are still shown.
-- **Settings**: the answer model, file types and passage size, the local API switch and port, the
-  account status, health check, backup, clear.
+The Redrob Canvas shape: a top bar with the view tabs (Ctrl+1..4), the Library and Help menus and
+the account chip; the library tree on the left (every folder with its document count and index
+state; pick one to scope Search to it); a messages dock on the right (Ctrl+Shift+M) for the status
+history and the files that could not be read; the live indexing progress with Pause / Resume on the
+bottom status line. Light or dark follows the system (Help > Theme); English or Korean follows Redrob
+Launcher's language, else the system (Help > Language). Help > Shortcuts lists the keys.
+
+- **Library**: the index state, the counts and the running pass; the folder cards with Reveal and
+  Remove; on first run one button, Add folder, and a drop target for a folder dragged onto the window.
+- **Search**: as you type (focused at launch and on Ctrl+K). Results ranked by meaning and by
+  keyword together: title, page, the path on one line (whole path on hover), the matching snippet,
+  the score. ↑ / ↓ select, Enter opens, Ctrl+Enter reveals in the file manager, Esc clears. Quoted
+  phrases, `-excluded` words, `heading:word` and `prefix*` work.
+- **Ask**: a question, the console's answer with `[1]`, `[2]` citations that jump to their source
+  and open the file, the sources beneath. Needs the shared sign-in; without it the locally found
+  sources are still shown.
+- **Settings**: one page -- account, answer model, index (file types, passage size), library
+  location, local API, language and theme -- with Apply / Reset; health check, backup and clear
+  beneath.
 
 ## Sign-in
 
@@ -105,7 +116,7 @@ stable; do not widen it.
 
 Linux x86_64 (`.tar.gz`, `.deb`), macOS on Apple silicon (`.dmg`, `.zip`; signed, notarized,
 stapled) and Windows x64 (`-portable.zip`, `-setup.exe`; Authenticode through Azure Artifact
-Signing), with `SHA256SUMS.txt` and `redrob-launcher.json` beside them, from
+Signing), with `SHA256SUMS.txt`, `redrob-launcher.json` and the `redrob-recall.png` icon it names beside them, from
 `.github/workflows/release.yml` ([release guide](docs/RELEASING.md)). The Windows setup speaks English
 and Korean. Intel Macs are not built: `ort-sys` (via `fastembed`) publishes no ONNX Runtime binary for
 `x86_64-apple-darwin`. Asset names are the ones Redrob Launcher installs.

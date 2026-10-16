@@ -79,7 +79,7 @@ SQLite schema changes use monotonic `PRAGMA user_version` migrations. Start-up p
 
 ## Releases
 
-`.github/workflows/release.yml` builds exactly three targets from the one cargo binary, signs and notarizes macOS, signs Windows through Azure Artifact Signing, and hands the artefacts to the shared redrob-labs publish job, which writes `SHA256SUMS.txt` and `redrob-launcher.json` and publishes the release. Redrob Launcher installs and updates the app from those; Recall has no updater of its own. `RELEASING.md` has the steps.
+`.github/workflows/release.yml` builds exactly three targets from the one cargo binary, signs and notarizes macOS, signs Windows through Azure Artifact Signing, and writes `redrob-launcher.json` and the `redrob-recall.png` icon it names (`tools/release_manifest.py`), and hands the artefacts to the shared redrob-labs publish job, which writes `SHA256SUMS.txt` and publishes the release. Redrob Launcher installs and updates the app from those; Recall has no updater of its own. `RELEASING.md` has the steps.
 
 ## Trust boundaries
 
