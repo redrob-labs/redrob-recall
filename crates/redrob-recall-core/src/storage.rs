@@ -442,21 +442,35 @@ impl Storage {
                       status, chunk_count, last_error
                FROM documents ORDER BY indexed_at DESC LIMIT ?1 OFFSET ?2"#,
         )?;
-        let rows = statement.query_map(params![limit as u64, offset as u64], |row| {
-            Ok(DocumentRecord {
-                id: row.get(0)?,
-                path: row.get(1)?,
-                name: row.get(2)?,
-                extension: row.get(3)?,
-                mime_type: row.get(4)?,
-                modified_at: row.get(5)?,
-                size_bytes: row.get(6)?,
-                status: row.get(7)?,
-                chunk_count: row.get(8)?,
-                last_error: row.get(9)?,
-            })
-        })?;
+        let rows = statement.query_map(params![limit as u64, offset as u64], Self::document_row)?;
         rows.collect::<Result<Vec<_>, _>>().map_err(Into::into)
+    }
+
+    /// The documents whose last pass failed, newest first, with their error.
+    pub fn failed_documents(&self, limit: usize) -> Result<Vec<DocumentRecord>> {
+        let connection = self.connection.lock();
+        let mut statement = connection.prepare(
+            r#"SELECT id, path, name, extension, mime_type, modified_at, size_bytes,
+                      status, chunk_count, last_error
+               FROM documents WHERE status = 'failed' ORDER BY indexed_at DESC LIMIT ?1"#,
+        )?;
+        let rows = statement.query_map(params![limit as u64], Self::document_row)?;
+        rows.collect::<Result<Vec<_>, _>>().map_err(Into::into)
+    }
+
+    fn document_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<DocumentRecord> {
+        Ok(DocumentRecord {
+            id: row.get(0)?,
+            path: row.get(1)?,
+            name: row.get(2)?,
+            extension: row.get(3)?,
+            mime_type: row.get(4)?,
+            modified_at: row.get(5)?,
+            size_bytes: row.get(6)?,
+            status: row.get(7)?,
+            chunk_count: row.get(8)?,
+            last_error: row.get(9)?,
+        })
     }
 
     pub fn stats(&self, status: IndexStatus, current_file: Option<String>) -> Result<IndexStats> {
