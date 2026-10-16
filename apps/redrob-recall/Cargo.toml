@@ -29,6 +29,8 @@ image.workspace = true
 log.workspace = true
 notify.workspace = true
 open.workspace = true
+# TODO pin to the tag of the redrob-code release that ships it
+redrob-app-bridge = { git = "https://github.com/redrob-labs/redrob-code", branch = "feat/channels-app-bridge" }
 redrob-recall-api.workspace = true
 redrob-recall-core.workspace = true
 reqwest.workspace = true
