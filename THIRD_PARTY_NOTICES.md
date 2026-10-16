@@ -32,7 +32,16 @@ This file covers components this product **embeds or depends on**. Source code *
 
 The committed `Cargo.lock` identifies the exact versions and transitive dependencies used by this build. Their license texts are available from the project links and the crate source distributions.
 
+The window bundles two fonts, each under the SIL Open Font License 1.1 (the licence texts are beside the files):
+
+| Font | License | Files | Project |
+| --- | --- | --- | --- |
+| Inter | SIL OFL 1.1 | `apps/redrob-recall/assets/fonts/Inter-*.ttf`, `OFL-Inter.txt` | https://github.com/rsms/inter |
+| JetBrains Mono | SIL OFL 1.1 | `apps/redrob-recall/assets/fonts/JetBrainsMono-Regular.ttf`, `OFL-JetBrainsMono.txt` | https://github.com/JetBrains/JetBrainsMono |
+
 The Windows setup embeds Pretendard (SIL Open Font License 1.1, https://github.com/orioncactus/pretendard) when the design system delivery is present at build time.
+
+The window's colour and spacing tokens (`apps/redrob-recall/src/theme.rs`) are the values Redrob Canvas draws with (redrob-labs/redrob-canvas, MIT OR Apache-2.0); the code is this repository's.
 
 ## Qdrant notice
 

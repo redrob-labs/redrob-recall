@@ -7,7 +7,10 @@
 use crate::{
     embedding::LocalEmbedder,
     indexer,
-    models::{AppSettings, FolderStatus, IndexProgress, IndexStats, IndexStatus, LibrarySnapshot},
+    models::{
+        AppSettings, DocumentRecord, FolderStatus, IndexProgress, IndexStats, IndexStatus,
+        LibrarySnapshot,
+    },
     storage::Storage,
 };
 use anyhow::{Context, Result};
@@ -175,6 +178,12 @@ impl Library {
 
     pub fn folders(&self) -> Result<Vec<FolderStatus>> {
         self.0.storage.folder_stats(&self.settings().library_paths)
+    }
+
+    /// The documents the last pass could not read, newest first, each with its error, for a
+    /// messages list (never a modal).
+    pub fn failed_documents(&self, limit: usize) -> Result<Vec<DocumentRecord>> {
+        self.0.storage.failed_documents(limit)
     }
 
     pub fn status(&self) -> IndexStatus {

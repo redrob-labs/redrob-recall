@@ -11,9 +11,11 @@
 
 mod account;
 mod console;
-mod fonts;
+mod i18n;
+mod prefs;
 mod services;
 mod shell;
+mod theme;
 mod work;
 
 use clap::{Parser, Subcommand};
@@ -107,7 +109,8 @@ fn run_window() -> anyhow::Result<()> {
         options,
         Box::new(move |cc| {
             egui_extras::install_image_loaders(&cc.egui_ctx);
-            fonts::install(&cc.egui_ctx);
+            // Fonts once, before the first frame; the shell sets the one style in `new`.
+            theme::install_fonts(&cc.egui_ctx);
             let app = shell::ShellApp::new(app_library.clone(), handle.clone(), &cc.egui_ctx);
             Ok(Box::new(app))
         }),

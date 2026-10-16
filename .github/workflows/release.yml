@@ -402,6 +402,10 @@ jobs:
               python3 tools/release/make_deb.py "$RUNNER_TEMP/stage" "$VERSION" "$out/${base}.deb"
               # The licence set once, from Linux, rather than three times under the same name.
               cp LICENSE NOTICE THIRD_PARTY_NOTICES.md UPSTREAM_NOTICES.md "$out/"
+              # The launcher manifest and the icon it names (tools/release_manifest.py), once, from
+              # Linux: redrob-launcher.json with "icon": "redrob-recall.png", so the publish job's
+              # SHA256SUMS.txt lists both and Redrob Launcher shows this release's own icon.
+              python3 tools/release_manifest.py --write "$out"
               ;;
           esac
 
@@ -585,8 +589,19 @@ jobs:
 
           echo "Every built platform asset (${REQUIRED_ARCHIVES}) and the licence files are present."
 
-  # The shared redrob-labs publish job: SHA256SUMS.txt over every asset, redrob-launcher.json (this
-  # app reads the launcher's shared account.json itself), and the release v<version> created
+      # The manifest Redrob Launcher reads and the icon it names, as the Linux leg wrote them:
+      # a release whose manifest names an icon that is not there, or not a square PNG, would make
+      # the launcher silently keep its built-in icon.
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.3.1
+        with:
+          ref: ${{ needs.validate.outputs.sha }}
+          path: source
+      - name: The launcher manifest names the icon beside it
+        run: python3 source/tools/release_manifest.py --check artifacts
+
+  # The shared redrob-labs publish job: SHA256SUMS.txt over every asset (redrob-launcher.json and
+  # redrob-recall.png among them, written by the Linux leg: launcher_manifest is false so the
+  # shared job does not write a manifest without the icon over ours), and the release v<version> created
   # and PUBLISHED as latest (prerelease when the version carries a `-`). Only for a real tag, never
   # for a dry run, and only when every job before it succeeded. `tag` and `target` are passed
   # explicitly because this workflow is dispatched from a branch: github.sha is the branch head, not
@@ -602,7 +617,7 @@ jobs:
     with:
       version: ${{ needs.validate.outputs.version }}
       title: Redrob Recall
-      launcher_manifest: true
+      launcher_manifest: false
       publish: true
       tag: ${{ needs.validate.outputs.tag }}
       target: ${{ needs.validate.outputs.sha }}
