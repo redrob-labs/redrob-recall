@@ -1,1 +1,0 @@
-{"default":{"identifier":"default","description":"Capabilities required by the Redrob Recall desktop window","local":true,"windows":["main"],"permissions":["core:default","dialog:allow-open","opener:allow-open-path","opener:allow-open-url","updater:default","process:allow-restart"]}}
