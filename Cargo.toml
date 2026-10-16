@@ -1,0 +1,89 @@
+[workspace]
+resolver = "3"
+members = ["crates/*", "apps/*"]
+
+[workspace.package]
+version = "0.4.0"
+edition = "2024"
+license = "Apache-2.0"
+rust-version = "1.95"
+repository = "https://github.com/redrob-labs/redrob-recall"
+authors = ["Janghoon Lee (Redrob) and contributors"]
+
+[workspace.dependencies]
+anyhow = "1"
+axum = "0.8"
+chrono = { version = "0.4", features = ["serde"] }
+clap = { version = "4", features = ["derive"] }
+directories = "6"
+eframe = { version = "0.36", default-features = false }
+egui = { version = "0.36", default-features = false }
+egui_extras = { version = "0.36", default-features = false }
+fastembed = { version = "6", default-features = false, features = ["ort-download-binaries-rustls-tls", "hf-hub-rustls-tls"] }
+futures-util = "0.3"
+ignore = "0.4"
+image = { version = "0.25", default-features = false, features = ["png"] }
+log = "0.4"
+mime_guess = "2"
+notify = "8"
+open = "5"
+parking_lot = "0.12"
+pdf-extract = "0.12"
+# Apache-2.0, Qdrant Solutions GmbH; NOTICE names the exact version, so it stays pinned.
+qdrant-edge = "=0.8.0"
+quick-xml = "0.42"
+# `rustls-tls` bundles the webpki roots; `rustls-tls-native-roots` adds the OS store, so a corporate
+# TLS-inspecting proxy's root still verifies; `system-proxy` reads the OS proxy settings.
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls", "rustls-tls-native-roots", "system-proxy", "stream"] }
+rfd = "0.17"
+rusqlite = { version = "0.37", features = ["bundled", "chrono"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+sha2 = "0.10"
+thiserror = "2"
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "sync", "time", "net"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+uuid = { version = "1", features = ["v4", "serde"] }
+webbrowser = "1"
+zip = { version = "9", default-features = false, features = ["deflate"] }
+redrob-recall-core = { path = "crates/redrob-recall-core" }
+redrob-recall-api = { path = "crates/redrob-recall-api" }
+
+[workspace.lints.rust]
+unsafe_code = "forbid"
+
+[workspace.lints.clippy]
+dbg_macro = "warn"
+expect_used = "deny"
+panic = "deny"
+todo = "warn"
+too_many_arguments = "allow"
+type_complexity = "allow"
+unimplemented = "deny"
+unreachable = "deny"
+unwrap_used = "deny"
+
+[profile.dev.package."*"]
+opt-level = 2
+
+[profile.dev]
+opt-level = 1
+
+# CI gates compile with `--profile ci`: no optimisation anywhere (the dev profile optimises every
+# dependency at level 2, which is what makes a cold `cargo test` take a quarter of an hour).
+[profile.ci]
+inherits = "dev"
+opt-level = 0
+debug = "line-tables-only"
+incremental = false
+
+[profile.ci.package."*"]
+opt-level = 0
+
+[profile.release]
+codegen-units = 1
+lto = "thin"
+opt-level = "s"
+panic = "abort"
+strip = true

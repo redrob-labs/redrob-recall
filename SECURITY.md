@@ -35,5 +35,5 @@ Include:
 - Metadata backups contain paths and extracted passages. Keep them on encrypted storage and inspect them before sharing.
 - Treat indexed files as untrusted parser input.
 - CI workflows use least-privilege permissions and pin external Actions to immutable commit SHAs.
-- Review dependency advisories before releases with `npm audit` and the RustSec CI check.
+- Review dependency advisories before releases with `cargo audit` against `Cargo.lock`.
 - Production release jobs fail when signing material is absent; do not distribute unsigned fallback builds.

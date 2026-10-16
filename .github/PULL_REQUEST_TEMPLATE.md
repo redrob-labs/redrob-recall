@@ -13,10 +13,10 @@
 <!-- The commands you actually ran, and what they printed. -->
 
 ```
-npm ci
-npm run verify
-npm audit
-cargo audit --file src-tauri/Cargo.lock
+cargo fmt --all -- --check
+cargo clippy -p redrob-recall -p redrob-recall-core -p redrob-recall-api --all-targets --profile ci -- -D warnings
+cargo test -p redrob-recall-core -p redrob-recall-api --profile ci
+python3 scripts/check-brand.py && python3 scripts/check-version.py
 ```
 
 ## Checklist
@@ -25,8 +25,8 @@ cargo audit --file src-tauri/Cargo.lock
       the tests, or the commit messages.
 - [ ] Local-first guarantee preserved: nothing new leaves the machine except the
       excerpts the user explicitly sends with Ask.
-- [ ] If a dependency changed, `npm audit` and `cargo audit` are clean, and
+- [ ] If a dependency changed, `cargo audit` is clean, and
       `THIRD_PARTY_NOTICES.md` still identifies every principal component.
-- [ ] Versions stay in lockstep (`npm run check:version`).
+- [ ] The workspace version has its dated CHANGELOG section (`python3 scripts/check-version.py`).
 - [ ] "Qdrant" appears only where it identifies the upstream engine, never as
       Redrob product naming.

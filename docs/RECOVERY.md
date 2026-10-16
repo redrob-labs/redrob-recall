@@ -15,7 +15,7 @@ Redrob Recall stores derived data in `~/.redrob/recall`. Original files remain a
 
 ## Create a backup
 
-Open **Settings → Storage → Create backup**. Indexing must be idle. The backup contains paths, metadata, and extracted passages, so protect it as carefully as the original documents and use full-disk encryption.
+Open **Settings → Maintenance → Back up metadata**. Indexing must be idle. The backup contains paths, metadata, and extracted passages, so protect it as carefully as the original documents and use full-disk encryption.
 
 A metadata backup does not include the vector index or downloaded model; both are rebuildable.
 
@@ -35,7 +35,7 @@ Never restore a database from a newer app version into an older application. Kee
 
 ## Full rebuild
 
-Use **Settings → Clear local index**, then **Check now**. Clearing removes extracted passages and vectors but does not remove selected folder settings, the embedding model, API credentials, or original files.
+Use **Settings → Maintenance → Clear the index**, then **Library → Check now**. Clearing removes extracted passages and vectors but does not remove selected folder settings, the embedding model, the local API token, or original files.
 
 ## Disk-full or interrupted updates
 
