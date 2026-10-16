@@ -74,8 +74,9 @@ pub fn system() -> &'static LangInfo {
     {
         return from_tags(&[tag]);
     }
-    let tags: Vec<String> = std::panic::catch_unwind(|| sys_locale::get_locales().take(64).collect())
-        .unwrap_or_default();
+    let tags: Vec<String> =
+        std::panic::catch_unwind(|| sys_locale::get_locales().take(64).collect())
+            .unwrap_or_default();
     from_tags(&tags)
 }
 
@@ -227,7 +228,10 @@ const KO: &[(&str, &str)] = &[
         "Follow Redrob Launcher's language, else the operating system's",
         "Redrob Launcher의 언어를, 없으면 운영 체제의 언어를 따릅니다",
     ),
-    ("Follow the operating system's appearance", "운영 체제의 모양을 따릅니다"),
+    (
+        "Follow the operating system's appearance",
+        "운영 체제의 모양을 따릅니다",
+    ),
     ("Shortcuts", "단축키"),
     ("About {app}", "{app} 정보"),
     ("Open the repository", "저장소 열기"),
@@ -237,7 +241,10 @@ const KO: &[(&str, &str)] = &[
     ("No messages", "메시지가 없습니다"),
     ("Clear", "지우기"),
     ("Hide", "숨기기"),
-    ("Signed in with Redrob Launcher", "Redrob Launcher로 로그인됨"),
+    (
+        "Signed in with Redrob Launcher",
+        "Redrob Launcher로 로그인됨",
+    ),
     ("Not signed in", "로그인되지 않음"),
     ("Connect", "연결"),
     (
@@ -258,7 +265,10 @@ const KO: &[(&str, &str)] = &[
     ("Focus the search box", "검색창에 포커스"),
     ("Toggle the messages panel", "메시지 패널 전환"),
     ("Open the selected result", "선택한 결과 열기"),
-    ("Reveal the selected result in the file manager", "선택한 결과를 파일 관리자에서 표시"),
+    (
+        "Reveal the selected result in the file manager",
+        "선택한 결과를 파일 관리자에서 표시",
+    ),
     ("Clear the search", "검색 지우기"),
     ("Move between results", "결과 사이 이동"),
     // Library panel.
@@ -277,19 +287,34 @@ const KO: &[(&str, &str)] = &[
         "Add a folder and Recall indexes it on this machine. Nothing leaves it.",
         "폴더를 추가하면 Recall이 이 컴퓨터에서 색인합니다. 아무것도 밖으로 나가지 않습니다.",
     ),
-    ("or drop a folder onto this window", "또는 폴더를 이 창에 끌어다 놓으세요"),
+    (
+        "or drop a folder onto this window",
+        "또는 폴더를 이 창에 끌어다 놓으세요",
+    ),
     ("Drop to add the folder", "놓으면 폴더가 추가됩니다"),
     ("Added {path}", "{path} 추가됨"),
     ("Removed {path}", "{path} 제거됨"),
     ("Remove", "제거"),
     ("Reveal", "표시"),
     ("Open", "열기"),
-    ("Wait for indexing to finish", "색인이 끝날 때까지 기다리세요"),
+    (
+        "Wait for indexing to finish",
+        "색인이 끝날 때까지 기다리세요",
+    ),
     ("Re-reading your library", "라이브러리를 다시 읽는 중"),
-    ("Queued behind the running pass", "실행 중인 작업 뒤에 예약됨"),
+    (
+        "Queued behind the running pass",
+        "실행 중인 작업 뒤에 예약됨",
+    ),
     ("Last indexed {when}", "마지막 색인 {when}"),
-    ("{docs} documents, {passages} passages, {size}", "문서 {docs}개, 구절 {passages}개, {size}"),
-    ("{n} files could not be read", "파일 {n}개를 읽을 수 없습니다"),
+    (
+        "{docs} documents, {passages} passages, {size}",
+        "문서 {docs}개, 구절 {passages}개, {size}",
+    ),
+    (
+        "{n} files could not be read",
+        "파일 {n}개를 읽을 수 없습니다",
+    ),
     ("Show", "보기"),
     ("Folder", "폴더"),
     (
@@ -299,7 +324,10 @@ const KO: &[(&str, &str)] = &[
     ("{done} / {total}", "{done} / {total}"),
     ("{done} / {total}  {file}", "{done} / {total}  {file}"),
     ("Indexing paused", "색인 일시 중지됨"),
-    ("The library could not be read: {error}", "라이브러리를 읽을 수 없습니다: {error}"),
+    (
+        "The library could not be read: {error}",
+        "라이브러리를 읽을 수 없습니다: {error}",
+    ),
     ("{path} is not a folder", "{path}은(는) 폴더가 아닙니다"),
     ("Files that could not be read", "읽을 수 없는 파일"),
     // Search.
@@ -308,14 +336,20 @@ const KO: &[(&str, &str)] = &[
         "파일 검색: 단어, \"구절\", -제외어, heading:단어",
     ),
     ("pdf, md", "pdf, md"),
-    ("Only these file types (comma separated)", "이 파일 형식만 (쉼표로 구분)"),
+    (
+        "Only these file types (comma separated)",
+        "이 파일 형식만 (쉼표로 구분)",
+    ),
     ("Searching…", "검색 중…"),
     ("{n} results for {query}", "{query} 검색 결과 {n}개"),
     ("No results for {query}", "{query} 검색 결과가 없습니다"),
     ("in {folder}", "{folder} 안에서"),
     ("Ask about this", "이것에 대해 질문"),
     ("p. {page}", "{page}쪽"),
-    ("Type to search; Enter opens, Ctrl+Enter reveals, Esc clears.", "입력하면 검색됩니다. Enter 열기, Ctrl+Enter 표시, Esc 지우기."),
+    (
+        "Type to search; Enter opens, Ctrl+Enter reveals, Esc clears.",
+        "입력하면 검색됩니다. Enter 열기, Ctrl+Enter 표시, Esc 지우기.",
+    ),
     // Ask.
     ("Ask a question about your files", "파일에 대해 질문하세요"),
     (
@@ -327,12 +361,21 @@ const KO: &[(&str, &str)] = &[
         "질문하려면 Redrob Launcher로 로그인하세요. 검색은 로그인 없이도 됩니다.",
     ),
     ("Get Redrob Launcher", "Redrob Launcher 받기"),
-    ("Reading your files and asking Redrob", "파일을 읽고 Redrob에 묻는 중"),
+    (
+        "Reading your files and asking Redrob",
+        "파일을 읽고 Redrob에 묻는 중",
+    ),
     ("Sources", "출처"),
     ("Sources found locally", "로컬에서 찾은 출처"),
     ("{model} in {secs}s", "{model}, {secs}초"),
-    ("{model} in {secs}s, {input} in / {output} out tokens", "{model}, {secs}초, 토큰 입력 {input} / 출력 {output}"),
-    ("Jump to source {n} and open the file", "출처 {n}으로 이동하고 파일 열기"),
+    (
+        "{model} in {secs}s, {input} in / {output} out tokens",
+        "{model}, {secs}초, 토큰 입력 {input} / 출력 {output}",
+    ),
+    (
+        "Jump to source {n} and open the file",
+        "출처 {n}으로 이동하고 파일 열기",
+    ),
     // Settings.
     ("Redrob account", "Redrob 계정"),
     ("Signed in as {account}", "{account}로 로그인됨"),

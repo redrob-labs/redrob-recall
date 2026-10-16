@@ -280,7 +280,10 @@ impl ShellApp {
         match self.library.snapshot() {
             Ok(snapshot) => {
                 if snapshot.stats.failed > 0 || !self.failed.is_empty() {
-                    self.failed = self.library.failed_documents(MAX_FAILED).unwrap_or_default();
+                    self.failed = self
+                        .library
+                        .failed_documents(MAX_FAILED)
+                        .unwrap_or_default();
                 }
                 self.snapshot = Some(snapshot);
             }
@@ -928,12 +931,15 @@ impl ShellApp {
         // The indexing chip, while a pass runs.
         if let Some(status) = self.snapshot.as_ref().map(|s| s.stats.status.clone()) {
             let text = match (&status, &self.progress) {
-                (IndexStatus::Indexing | IndexStatus::Scanning, Some(p)) if p.total > 0 => Some(
-                    tf(
+                (IndexStatus::Indexing | IndexStatus::Scanning, Some(p)) if p.total > 0 => {
+                    Some(tf(
                         "{done} / {total}",
-                        &[("done", &p.processed.to_string()), ("total", &p.total.to_string())],
-                    ),
-                ),
+                        &[
+                            ("done", &p.processed.to_string()),
+                            ("total", &p.total.to_string()),
+                        ],
+                    ))
+                }
                 (IndexStatus::Indexing, _) => Some(t("Indexing").to_string()),
                 (IndexStatus::Scanning, _) => Some(t("Scanning").to_string()),
                 (IndexStatus::Paused, _) => Some(t("Paused").to_string()),
@@ -1266,7 +1272,11 @@ impl ShellApp {
                     IndexStatus::Paused => (t("Paused"), t_.warning),
                     IndexStatus::Error => (t("Error"), t_.danger),
                 };
-                ui.label(egui::RichText::new(label).font(theme::semibold(13.0)).color(color));
+                ui.label(
+                    egui::RichText::new(label)
+                        .font(theme::semibold(13.0))
+                        .color(color),
+                );
                 ui.separator();
                 ui.label(tf(
                     "{docs} documents, {passages} passages, {size}",
@@ -1357,10 +1367,7 @@ impl ShellApp {
         });
         ui.add_space(8.0);
 
-        let busy = matches!(
-            stats.status,
-            IndexStatus::Indexing | IndexStatus::Scanning
-        );
+        let busy = matches!(stats.status, IndexStatus::Indexing | IndexStatus::Scanning);
         let folders: Vec<_> = snapshot
             .folders
             .iter()
@@ -1513,7 +1520,10 @@ impl ShellApp {
                 ui.colored_label(t_.danger, error);
             } else if !self.search.searched_for.is_empty() {
                 let text = if self.search.results.is_empty() {
-                    tf("No results for {query}", &[("query", &self.search.searched_for)])
+                    tf(
+                        "No results for {query}",
+                        &[("query", &self.search.searched_for)],
+                    )
                 } else {
                     tf(
                         "{n} results for {query}",
@@ -1678,13 +1688,10 @@ impl ShellApp {
                 response.request_focus();
                 self.ask.focus_box = false;
             }
-            let submitted =
-                response.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
-            let button = egui::Button::new(
-                egui::RichText::new(t("Ask")).color(t_.primary_text),
-            )
-            .fill(t_.primary_bg)
-            .min_size(egui::vec2(100.0, 30.0));
+            let submitted = response.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
+            let button = egui::Button::new(egui::RichText::new(t("Ask")).color(t_.primary_text))
+                .fill(t_.primary_bg)
+                .min_size(egui::vec2(100.0, 30.0));
             if ui.add_enabled(!self.ask.asking, button).clicked() || submitted {
                 self.start_ask(ctx);
             }
@@ -1759,8 +1766,7 @@ impl ShellApp {
                         ui.set_width(ui.available_width());
                         ui.colored_label(t_.danger, &failure.message);
                         ui.label(
-                            egui::RichText::new(format!("({})", failure.code))
-                                .color(t_.text_faint),
+                            egui::RichText::new(format!("({})", failure.code)).color(t_.text_faint),
                         );
                         if failure.code == "not_signed_in"
                             && ui.link(t("Get Redrob Launcher")).clicked()
@@ -1774,7 +1780,15 @@ impl ShellApp {
                             egui::RichText::new(t("Sources found locally"))
                                 .font(theme::semibold(12.5)),
                         );
-                        sources_list(ui, &t_, &failure.sources, None, None, &mut open, &mut reveal);
+                        sources_list(
+                            ui,
+                            &t_,
+                            &failure.sources,
+                            None,
+                            None,
+                            &mut open,
+                            &mut reveal,
+                        );
                     }
                 }
             });
@@ -2317,16 +2331,17 @@ fn tree_row(
         painter.circle_filled(egui::pos2(rect.left() + 12.0, rect.center().y), 4.0, dot);
         let text_left = rect.left() + 24.0;
         let width = (rect.right() - 8.0 - text_left).max(10.0);
-        let mut name_job = egui::text::LayoutJob::simple_singleline(
-            name.to_owned(),
-            theme::medium(12.5),
-            t_.text,
-        );
+        let mut name_job =
+            egui::text::LayoutJob::simple_singleline(name.to_owned(), theme::medium(12.5), t_.text);
         name_job.wrap.max_width = width;
         name_job.wrap.max_rows = 1;
         name_job.wrap.break_anywhere = true;
         let name_galley = painter.layout_job(name_job);
-        painter.galley(egui::pos2(text_left, rect.top() + 4.0), name_galley, t_.text);
+        painter.galley(
+            egui::pos2(text_left, rect.top() + 4.0),
+            name_galley,
+            t_.text,
+        );
         let mut detail_job = egui::text::LayoutJob::simple_singleline(
             detail.to_owned(),
             egui::FontId::proportional(10.5),

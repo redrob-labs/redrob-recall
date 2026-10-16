@@ -8,7 +8,10 @@
 //! THIRD_PARTY_NOTICES.md), egui's defaults after them for symbols, and the first CJK-capable
 //! system font found as the last fallback, read once -- a library is full of Hangul, Han and Kana.
 
-use egui::{Color32, CornerRadius, FontData, FontDefinitions, FontFamily, FontId, Stroke, TextStyle, Visuals};
+use egui::{
+    Color32, CornerRadius, FontData, FontDefinitions, FontFamily, FontId, Stroke, TextStyle,
+    Visuals,
+};
 use std::sync::Arc;
 
 /// Light or dark: what the window is drawn in this frame.
@@ -170,7 +173,10 @@ pub fn panel_frame(ui: &egui::Ui) -> egui::Frame {
     let visuals = ui.visuals();
     egui::Frame::NONE
         .fill(visuals.panel_fill)
-        .stroke(Stroke::new(1.0, visuals.widgets.noninteractive.bg_stroke.color))
+        .stroke(Stroke::new(
+            1.0,
+            visuals.widgets.noninteractive.bg_stroke.color,
+        ))
 }
 
 /// A card: the card fill, its border, the small radius and an 10 px margin.
@@ -321,7 +327,9 @@ const CJK_CANDIDATES: &[&str] = &[
 pub fn font_definitions() -> FontDefinitions {
     let mut fonts = FontDefinitions::default();
     let add = |fonts: &mut FontDefinitions, name: &str, bytes: &'static [u8]| {
-        fonts.font_data.insert(name.to_owned(), Arc::new(FontData::from_static(bytes)));
+        fonts
+            .font_data
+            .insert(name.to_owned(), Arc::new(FontData::from_static(bytes)));
         name.to_owned()
     };
     let inter = add(&mut fonts, "Inter", INTER_REGULAR);
@@ -346,7 +354,9 @@ pub fn font_definitions() -> FontDefinitions {
     for (family, primary) in [("medium", medium), ("semibold", semibold)] {
         let mut stack = vec![primary];
         stack.extend(fallback.iter().cloned());
-        fonts.families.insert(FontFamily::Name(family.into()), stack);
+        fonts
+            .families
+            .insert(FontFamily::Name(family.into()), stack);
     }
     match CJK_CANDIDATES
         .iter()
