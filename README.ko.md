@@ -97,9 +97,9 @@ Tauri는 플랫폼별 번들을 `src-tauri/target/release/bundle/`에 씁니다.
 
 ## Redrob 연결
 
-Ask는 이 컴퓨터의 공용 **Redrob Code** 엔진을 거칩니다. 엔진이 모든 Redrob 앱의 콘솔 키를 갖습니다. [Redrob Launcher](https://github.com/redrob-labs/redrob-launcher/releases/latest)로 설치하세요. 엔진이 없으면 연결 패널이 그렇게 알리고 Ask는 쓸 수 없습니다(로컬 색인과 검색은 그대로 동작합니다).
+이 컴퓨터가 [Redrob Launcher](https://github.com/redrob-labs/redrob-launcher/releases/latest)로 로그인되어 있으면 아무것도 붙여 넣을 필요가 없습니다. 앱이 런처의 공유 로그인(`account.json`, 바뀔 때마다 다시 읽음)을 직접 읽고, 패널에 **Signed in with Redrob Launcher as <계정>**이 표시되며, Ask는 그 로그인으로 Redrob 콘솔에 질문을 보냅니다.
 
-이 컴퓨터가 이미 Redrob Launcher로 로그인되어 있으면 아무것도 붙여 넣을 필요가 없습니다. 엔진이 그 로그인을 읽고 패널에 **Redrob Launcher로 로그인됨**이 표시됩니다. 그렇지 않으면:
+그렇지 않으면 Ask는 이 컴퓨터의 공용 **Redrob Code** 엔진을 거칩니다. 엔진이 모든 Redrob 앱의 콘솔 키를 갖습니다. Redrob Launcher로 설치하세요. 둘 다 없으면 연결 패널이 그렇게 알리고 Ask는 쓸 수 없습니다(로컬 색인과 검색은 그대로 동작합니다). 엔진으로 로그인하려면:
 
 1. `https://console.redrob.ai/api-keys`에서 워크스페이스 API 키를 만들거나 고릅니다.
 2. **Ask** 또는 **설정 → Redrob 연결**을 엽니다.

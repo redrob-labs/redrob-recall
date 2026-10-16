@@ -97,9 +97,9 @@ The application pins Qdrant Edge 0.8.0. That release uses a standard-library mac
 
 ## Connect Redrob
 
-Ask runs through the shared **Redrob Code** engine on this computer, which holds the Redrob console key for every Redrob app. Install it with [Redrob Launcher](https://github.com/redrob-labs/redrob-launcher/releases/latest); without it the connection panel says so and Ask is unavailable (local indexing and Search still work).
+If this computer is signed in through [Redrob Launcher](https://github.com/redrob-labs/redrob-launcher/releases/latest), nothing needs to be pasted: the app reads the launcher's shared sign-in (`account.json`, re-read whenever it changes), the panel shows **Signed in with Redrob Launcher as <account>**, and Ask sends its questions to the Redrob console with that sign-in.
 
-If this computer is already signed in through Redrob Launcher, nothing needs to be pasted: the engine reads that sign-in and the panel shows **Signed in with Redrob Launcher**. Otherwise:
+Without it, Ask runs through the shared **Redrob Code** engine on this computer, which holds a Redrob console key for every Redrob app. Install it with Redrob Launcher; without either the connection panel says so and Ask is unavailable (local indexing and Search still work). To sign in through the engine:
 
 1. Create or select a workspace API key at `https://console.redrob.ai/api-keys`.
 2. Open **Ask** or **Settings → Redrob connection**.

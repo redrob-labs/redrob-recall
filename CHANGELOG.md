@@ -4,6 +4,15 @@ All notable changes to Redrob Recall are documented here.
 
 ## [Unreleased]
 
+### Fixed
+
+- Ask failed with "Redrob could not accept this request" while the connection panel said Disconnect. Two causes: the request named the model `auto`, which the Redrob Code daemon resolves only as `redrob/auto` (it answered 400 "model auto is not available on this engine"), and the key the daemon held was not the one Redrob Launcher had signed the computer in with. The daemon path now sends `redrob/<model>` when the setting names no provider, and a refusal appends what Redrob actually said ("Redrob said: ...") instead of only its class.
+- The Windows installer showed the stock NSIS art and only English. It now carries the Recall icon, a header and Welcome/Finish sidebar drawn from the app icon, offers English and Korean with the language selector, and names Redrob as the publisher (Apps & features, the MSI and the dmg).
+
+### Added
+
+- The app reads Redrob Launcher's shared sign-in itself (`account.json` in `$XDG_CONFIG_HOME/redrob-shared`, `~/Library/Application Support/ai.redrob.shared` or `%APPDATA%\Redrob\Shared`; `REDROB_SHARED_DIR` overrides) at startup, on every connection refresh and whenever the file changes. A key there is this app's sign-in: the panel says "Signed in with Redrob Launcher as <account>" and Ask spends that key at the file's `apiBaseUrl`, the shared-account contract's own path. Without the file the Redrob Code daemon path is unchanged.
+
 ### Changed
 
 - The release workflow uses the shared redrob-labs pieces: `gitflow.yml` calls the org's reusable workflow (one branch-type list, automatic back-merge pull request); Windows installers are Authenticode-signed through Azure Artifact Signing with the job's OpenID Connect login and the shared `sign.ps1` as Tauri's sign command (no certificate file, no `WIN_CSC_*` secrets, `signtool verify /pa` must read Valid from `McKinley Rice, Inc.`); and the release is created and **published as latest** by the shared `release-publish` workflow, which also writes `SHA256SUMS.txt` and `redrob-launcher.json`. Nothing is drafted for a human to publish any more; a version with a `-` suffix publishes as a pre-release, which `latest` skips.
