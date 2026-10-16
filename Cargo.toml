@@ -22,6 +22,7 @@ egui_extras = { version = "0.36", default-features = false }
 fastembed = { version = "6", default-features = false, features = ["ort-download-binaries-rustls-tls", "hf-hub-rustls-tls"] }
 futures-util = "0.3"
 ignore = "0.4"
+image = { version = "0.25", default-features = false, features = ["png"] }
 log = "0.4"
 mime_guess = "2"
 notify = "8"
