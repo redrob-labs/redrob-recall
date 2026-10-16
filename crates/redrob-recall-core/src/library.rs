@@ -50,6 +50,18 @@ struct Inner {
 #[derive(Clone)]
 pub struct Library(Arc<Inner>);
 
+/// A handle that does not keep the library alive: what the file watcher's callback holds, since the
+/// watcher itself lives inside the library (a strong handle there would be a cycle, and the vector
+/// index's WAL lock would never be released).
+#[derive(Clone)]
+pub struct WeakLibrary(std::sync::Weak<Inner>);
+
+impl WeakLibrary {
+    pub fn upgrade(&self) -> Option<Library> {
+        self.0.upgrade().map(Library)
+    }
+}
+
 /// `~/.redrob/recall`: where the metadata database, the vector index, the embedding model cache and
 /// the local API token live. `REDROB_RECALL_DATA_DIR` overrides it (tests, portable setups).
 pub fn default_data_dir() -> Result<PathBuf> {
@@ -121,6 +133,10 @@ impl Library {
         if !self.settings().library_paths.is_empty() {
             indexer::request_index(self);
         }
+    }
+
+    pub fn downgrade(&self) -> WeakLibrary {
+        WeakLibrary(Arc::downgrade(&self.0))
     }
 
     /// Who to wake when the snapshot changes (one listener; the latest wins).

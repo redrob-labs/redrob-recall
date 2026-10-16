@@ -28,19 +28,21 @@ use std::{
 use zip::ZipArchive;
 
 pub fn configure_watcher(state: &Library) -> Result<()> {
-    let state_for_callback = state.clone();
+    // Weak: the watcher lives inside the library, so a strong handle here would be a cycle that
+    // kept the stores (and the vector index's WAL lock) alive after the last real handle was dropped.
+    let weak = state.downgrade();
     let mut watcher = notify::recommended_watcher(move |result: notify::Result<notify::Event>| {
         let Ok(event) = result else { return };
         if !event.kind.is_create() && !event.kind.is_modify() && !event.kind.is_remove() {
             return;
         }
-        if state_for_callback.is_paused() {
+        let Some(state) = weak.upgrade() else { return };
+        if state.is_paused() {
             return;
         }
         // A change during a pass used to be dropped here (`is_indexing` -> return): a file saved
         // after the pass had walked past it stayed stale until some later change. Queue it
         // instead; `request_index` collapses a burst of events into at most one more pass.
-        let state = state_for_callback.clone();
         let _ = std::thread::Builder::new()
             .name("recall-watch-debounce".into())
             .spawn(move || {
