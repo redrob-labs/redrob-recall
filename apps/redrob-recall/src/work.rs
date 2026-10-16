@@ -155,23 +155,3 @@ pub fn plain_snippet(result: &SearchResult) -> String {
 pub fn strip_bold(text: &str) -> String {
     text.replace("<b>", "").replace("</b>", "")
 }
-
-/// The matched words of a snippet, for highlighting: the text between `<b>` and `</b>`.
-pub fn bold_terms(text: &str) -> Vec<String> {
-    let mut terms = Vec::new();
-    let mut rest = text;
-    while let Some(start) = rest.find("<b>") {
-        let after = &rest[start + 3..];
-        match after.find("</b>") {
-            Some(end) => {
-                let term = &after[..end];
-                if !term.is_empty() && !terms.iter().any(|t: &String| t == term) {
-                    terms.push(term.to_string());
-                }
-                rest = &after[end + 4..];
-            }
-            None => break,
-        }
-    }
-    terms
-}

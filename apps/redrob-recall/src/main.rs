@@ -21,7 +21,11 @@ use redrob_recall_core::{Library, SearchFilters, SearchRequest, default_data_dir
 use std::path::PathBuf;
 
 #[derive(Parser)]
-#[command(name = "redrob-recall", version, about = "Redrob Recall: local memory and search for your own files")]
+#[command(
+    name = "redrob-recall",
+    version,
+    about = "Redrob Recall: local memory and search for your own files"
+)]
 struct Cli {
     #[command(subcommand)]
     command: Option<Command>,
@@ -53,8 +57,9 @@ enum Command {
 fn main() -> anyhow::Result<()> {
     tracing_subscriber::fmt()
         .with_env_filter(
-            tracing_subscriber::EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| "redrob_recall=info,redrob_recall_core=info,redrob_recall_api=info".into()),
+            tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| {
+                "redrob_recall=info,redrob_recall_core=info,redrob_recall_api=info".into()
+            }),
         )
         .compact()
         .init();
@@ -86,6 +91,7 @@ fn run_window() -> anyhow::Result<()> {
     });
     library.start_background_services();
     let handle = runtime.handle().clone();
+    let app_library = library.clone();
     let mut options = services::native_options();
     // Nothing draws indirectly, so wgpu's indirect-call validation only costs a compute shader at
     // start-up that some drivers cannot compile (as redrob-canvas found).
@@ -102,7 +108,7 @@ fn run_window() -> anyhow::Result<()> {
         Box::new(move |cc| {
             egui_extras::install_image_loaders(&cc.egui_ctx);
             fonts::install(&cc.egui_ctx);
-            let app = shell::ShellApp::new(library.clone(), handle.clone(), &cc.egui_ctx);
+            let app = shell::ShellApp::new(app_library.clone(), handle.clone(), &cc.egui_ctx);
             Ok(Box::new(app))
         }),
     );
@@ -152,7 +158,10 @@ fn run_index(dir: PathBuf) -> anyhow::Result<()> {
         if let Some(progress) = library.progress() {
             let line = match &progress.current_file {
                 Some(file) => format!("{}/{} {}", progress.processed, progress.total, file),
-                None => format!("{}/{} {}", progress.processed, progress.total, progress.message),
+                None => format!(
+                    "{}/{} {}",
+                    progress.processed, progress.total, progress.message
+                ),
             };
             if line != last {
                 println!("{line}");

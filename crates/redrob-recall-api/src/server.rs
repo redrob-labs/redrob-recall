@@ -115,7 +115,10 @@ async fn status(State(context): State<ApiContext>, headers: HeaderMap) -> impl I
         }
         Err(error) => {
             tracing::error!(%error, "local API status failed");
-            api_error(StatusCode::INTERNAL_SERVER_ERROR, "status could not be read")
+            api_error(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "status could not be read",
+            )
         }
     }
 }
@@ -234,7 +237,10 @@ fn folders_response(context: &ApiContext) -> (StatusCode, Json<serde_json::Value
         ),
         Err(error) => {
             tracing::error!(%error, "local API could not list folders");
-            api_error(StatusCode::INTERNAL_SERVER_ERROR, "folders could not be read")
+            api_error(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "folders could not be read",
+            )
         }
     }
 }

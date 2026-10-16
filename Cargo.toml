@@ -46,7 +46,7 @@ tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 uuid = { version = "1", features = ["v4", "serde"] }
 webbrowser = "1"
-zip = { version = "6", default-features = false, features = ["deflate"] }
+zip = { version = "9", default-features = false, features = ["deflate"] }
 redrob-recall-core = { path = "crates/redrob-recall-core" }
 redrob-recall-api = { path = "crates/redrob-recall-api" }
 

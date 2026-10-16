@@ -142,7 +142,11 @@ pub async fn ask(
         .send()
         .await
         .map_err(|error| {
-            let code = if error.is_timeout() { "timeout" } else { "network_error" };
+            let code = if error.is_timeout() {
+                "timeout"
+            } else {
+                "network_error"
+            };
             ConsoleError::new(code, format!("Redrob could not be reached: {error}"), 503)
         })?;
     let status = response.status();
@@ -172,12 +176,8 @@ pub async fn ask(
     }
     if !status.is_success() {
         // The console's own words first; a bare status only when it sent none.
-        let (message, code) = upstream_message(&raw).unwrap_or_else(|| {
-            (
-                format!("Redrob answered {status} with no message."),
-                None,
-            )
-        });
+        let (message, code) = upstream_message(&raw)
+            .unwrap_or_else(|| (format!("Redrob answered {status} with no message."), None));
         let code = code.unwrap_or_else(|| match status.as_u16() {
             401 | 403 => "authentication_required".into(),
             402 => "insufficient_balance".into(),
@@ -213,7 +213,10 @@ pub async fn ask(
         answer,
         sources,
         model: completion.model.unwrap_or_else(|| model.to_string()),
-        input_tokens: completion.usage.as_ref().and_then(|usage| usage.prompt_tokens),
+        input_tokens: completion
+            .usage
+            .as_ref()
+            .and_then(|usage| usage.prompt_tokens),
         output_tokens: completion
             .usage
             .as_ref()

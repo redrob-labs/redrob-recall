@@ -284,9 +284,11 @@ fn add_folder_refuses_bad_paths_with_a_reason_and_saves_nothing() {
     );
 
     add(&fixtures()).unwrap();
-    assert!(add(&fixtures())
-        .unwrap_err()
-        .ends_with("is already in your library"));
+    assert!(
+        add(&fixtures())
+            .unwrap_err()
+            .ends_with("is already in your library")
+    );
     assert_eq!(state.settings().library_paths.len(), 1);
     while state.is_indexing() {
         std::thread::sleep(std::time::Duration::from_millis(20));

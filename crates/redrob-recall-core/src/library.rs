@@ -240,13 +240,15 @@ impl Library {
             return Err("Wait for indexing to finish before removing a library folder".into());
         }
         let mut settings = self.settings();
-        if !settings.library_paths.iter().any(|candidate| candidate == path) {
+        if !settings
+            .library_paths
+            .iter()
+            .any(|candidate| candidate == path)
+        {
             self.set_indexing(false);
             return Err(format!("{path} is not in your library"));
         }
-        settings
-            .library_paths
-            .retain(|candidate| candidate != path);
+        settings.library_paths.retain(|candidate| candidate != path);
         if let Err(error) = self.persist_settings(settings) {
             self.set_indexing(false);
             self.changed();
@@ -384,7 +386,10 @@ impl Library {
             .storage
             .integrity_check()
             .map_err(|error| error.to_string())?;
-        self.0.storage.create_backup().map_err(|error| error.to_string())
+        self.0
+            .storage
+            .create_backup()
+            .map_err(|error| error.to_string())
     }
 
     pub fn check_health(&self) -> Result<String, String> {
@@ -456,6 +461,15 @@ fn open_shard(path: &Path) -> Result<(EdgeShard, bool)> {
     if has_data {
         match EdgeShard::load(path, None) {
             Ok(shard) => return Ok((shard, false)),
+            // Another Redrob Recall (the window, or `serve`) holds the index: its WAL lock refuses
+            // us with WouldBlock. That is not corruption, and quarantining a healthy index because a
+            // second copy started would be the one way to lose it. Refuse instead.
+            Err(error) if format!("{error:?}").contains("WouldBlock") => {
+                anyhow::bail!(
+                    "another Redrob Recall is already using this library ({}); close it first",
+                    path.display()
+                );
+            }
             Err(error) => {
                 let quarantine = path.with_file_name(format!(
                     "qdrant-edge-corrupt-{}",

@@ -8,7 +8,10 @@ fn main() {
         res.set_icon("../../resources/icons/redrob-recall.ico");
         res.set("ProductName", "Redrob Recall");
         res.set("FileDescription", "Redrob Recall");
-        res.set("LegalCopyright", "Copyright 2026 Janghoon Lee (Redrob) and contributors");
+        res.set(
+            "LegalCopyright",
+            "Copyright 2026 Janghoon Lee (Redrob) and contributors",
+        );
         if let Err(error) = res.compile() {
             println!("cargo:warning=windows resource not embedded: {error}");
         }

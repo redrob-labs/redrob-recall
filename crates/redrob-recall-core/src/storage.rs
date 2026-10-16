@@ -9,7 +9,7 @@ use anyhow::{Context, Result};
 use chrono::Utc;
 use parking_lot::Mutex;
 use rusqlite::{
-    params, Connection, Error as SqliteError, ErrorCode, OpenFlags, OptionalExtension, Transaction,
+    Connection, Error as SqliteError, ErrorCode, OpenFlags, OptionalExtension, Transaction, params,
 };
 use std::{
     path::{Path, PathBuf},
@@ -851,7 +851,7 @@ fn map_chunk(row: &rusqlite::Row<'_>) -> rusqlite::Result<ChunkRecord> {
 #[cfg(test)]
 mod tests {
     #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
-    use super::{Storage, SCHEMA_VERSION};
+    use super::{SCHEMA_VERSION, Storage};
     use crate::models::AppSettings;
     use rusqlite::Connection;
 

@@ -6,7 +6,8 @@ use std::path::{Path, PathBuf};
 
 pub const APP_NAME: &str = "Redrob Recall";
 pub const APP_ID: &str = "ai.redrob.recall";
-pub const LAUNCHER_RELEASES: &str = "https://github.com/redrob-labs/redrob-launcher/releases/latest";
+pub const LAUNCHER_RELEASES: &str =
+    "https://github.com/redrob-labs/redrob-launcher/releases/latest";
 pub const REPOSITORY: &str = "https://github.com/redrob-labs/redrob-recall";
 
 /// The main window: 1200 x 780 (eframe shrinks it to the monitor), at least 720 x 480.
@@ -27,7 +28,8 @@ pub fn native_options() -> eframe::NativeOptions {
 
 /// The 256px icon from the brand pipeline, decoded for the window manager.
 fn window_icon() -> egui::IconData {
-    const PNG: &[u8] = include_bytes!("../../../resources/icons/hicolor/256x256/apps/redrob-recall.png");
+    const PNG: &[u8] =
+        include_bytes!("../../../resources/icons/hicolor/256x256/apps/redrob-recall.png");
     eframe::icon_data::from_png_bytes(PNG).unwrap_or_default()
 }
 

@@ -233,10 +233,13 @@ impl<'a> Parser<'a> {
             excluded.append(&mut more);
         }
         Ok((
-            if branches.len() == 1 {
-                branches.pop().expect("one branch")
-            } else {
-                Node::Any(branches)
+            match branches.pop() {
+                Some(only) if branches.is_empty() => only,
+                Some(last) => {
+                    branches.push(last);
+                    Node::Any(branches)
+                }
+                None => Node::Any(branches),
             },
             excluded,
         ))
@@ -275,10 +278,13 @@ impl<'a> Parser<'a> {
             }
         }
 
-        let node = match branches.len() {
-            0 => return Ok((Node::All(Vec::new()), excluded)),
-            1 => branches.pop().expect("one branch"),
-            _ => Node::All(branches),
+        let node = match branches.pop() {
+            None => return Ok((Node::All(Vec::new()), excluded)),
+            Some(only) if branches.is_empty() => only,
+            Some(last) => {
+                branches.push(last);
+                Node::All(branches)
+            }
         };
         Ok((node, excluded))
     }
@@ -326,14 +332,14 @@ impl<'a> Parser<'a> {
 
 /// A trailing `*` asks for a prefix match, which FTS5 supports natively.
 fn word_node(column: Option<String>, text: String) -> Node {
-    if let Some(stripped) = text.strip_suffix('*') {
-        if !stripped.is_empty() {
-            return Node::Term {
-                column,
-                text: stripped.to_string(),
-                prefix: true,
-            };
-        }
+    if let Some(stripped) = text.strip_suffix('*')
+        && !stripped.is_empty()
+    {
+        return Node::Term {
+            column,
+            text: stripped.to_string(),
+            prefix: true,
+        };
     }
     Node::Term {
         column,
@@ -387,9 +393,9 @@ fn drop_loose_stopwords(node: Node) -> Node {
                 .cloned()
                 .collect();
             // If every term was a function word, the person meant those words after all.
-            let kept = if kept.is_empty() { pruned } else { kept };
+            let mut kept = if kept.is_empty() { pruned } else { kept };
             if kept.len() == 1 {
-                kept.into_iter().next().expect("one")
+                kept.swap_remove(0)
             } else {
                 Node::All(kept)
             }
@@ -460,25 +466,25 @@ fn is_empty(node: &Node) -> bool {
 fn prune(node: Node) -> Node {
     match node {
         Node::All(parts) => {
-            let kept: Vec<Node> = parts
+            let mut kept: Vec<Node> = parts
                 .into_iter()
                 .map(prune)
                 .filter(|n| !is_empty(n))
                 .collect();
             if kept.len() == 1 {
-                kept.into_iter().next().expect("one")
+                kept.swap_remove(0)
             } else {
                 Node::All(kept)
             }
         }
         Node::Any(parts) => {
-            let kept: Vec<Node> = parts
+            let mut kept: Vec<Node> = parts
                 .into_iter()
                 .map(prune)
                 .filter(|n| !is_empty(n))
                 .collect();
             if kept.len() == 1 {
-                kept.into_iter().next().expect("one")
+                kept.swap_remove(0)
             } else {
                 Node::Any(kept)
             }

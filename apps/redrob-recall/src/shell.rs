@@ -40,7 +40,12 @@ pub enum Screen {
 }
 
 impl Screen {
-    pub const ALL: [Screen; 4] = [Screen::Library, Screen::Search, Screen::Ask, Screen::Settings];
+    pub const ALL: [Screen; 4] = [
+        Screen::Library,
+        Screen::Search,
+        Screen::Ask,
+        Screen::Settings,
+    ];
 
     pub fn label(self) -> &'static str {
         match self {
@@ -325,10 +330,12 @@ impl ShellApp {
                 if let Some(snapshot) = &self.snapshot {
                     let stats = &snapshot.stats;
                     let text = match stats.status {
-                        IndexStatus::Indexing | IndexStatus::Scanning => match &stats.current_file {
-                            Some(file) => format!("Indexing {file}"),
-                            None => "Indexing".to_string(),
-                        },
+                        IndexStatus::Indexing | IndexStatus::Scanning => {
+                            match &stats.current_file {
+                                Some(file) => format!("Indexing {file}"),
+                                None => "Indexing".to_string(),
+                            }
+                        }
                         IndexStatus::Paused => "Indexing paused".to_string(),
                         _ => format!(
                             "{} documents, {} passages",
@@ -357,7 +364,11 @@ impl ShellApp {
             ui.add_space(8.0);
             ui.weak(format!("v{}", env!("CARGO_PKG_VERSION")));
             let signed_in = self.account.is_some();
-            let label = if signed_in { "Signed in" } else { "Not signed in" };
+            let label = if signed_in {
+                "Signed in"
+            } else {
+                "Not signed in"
+            };
             ui.weak(label);
         });
     }
@@ -419,30 +430,35 @@ impl ShellApp {
                     }
                 });
             });
-            if let Some(progress) = &self.progress {
-                if matches!(
+            if let Some(progress) = &self.progress
+                && matches!(
                     stats.status,
                     IndexStatus::Indexing | IndexStatus::Scanning | IndexStatus::Paused
-                ) {
-                    let fraction = if progress.total == 0 {
-                        0.0
-                    } else {
-                        progress.processed as f32 / progress.total as f32
-                    };
-                    let text = match &progress.current_file {
-                        Some(file) => format!("{} / {}  {file}", progress.processed, progress.total),
-                        None => progress.message.clone(),
-                    };
-                    ui.add(
-                        egui::ProgressBar::new(fraction)
-                            .text(text)
-                            .fill(REDROB_BLUE)
-                            .animate(stats.status != IndexStatus::Paused),
-                    );
-                }
+                )
+            {
+                let fraction = if progress.total == 0 {
+                    0.0
+                } else {
+                    progress.processed as f32 / progress.total as f32
+                };
+                let text = match &progress.current_file {
+                    Some(file) => {
+                        format!("{} / {}  {file}", progress.processed, progress.total)
+                    }
+                    None => progress.message.clone(),
+                };
+                ui.add(
+                    egui::ProgressBar::new(fraction)
+                        .text(text)
+                        .fill(REDROB_BLUE)
+                        .animate(stats.status != IndexStatus::Paused),
+                );
             }
             if let Some(last) = &stats.last_indexed_at {
-                ui.weak(format!("Last indexed {}", last.replace('T', " ").chars().take(19).collect::<String>()));
+                ui.weak(format!(
+                    "Last indexed {}",
+                    last.replace('T', " ").chars().take(19).collect::<String>()
+                ));
             }
         });
         ui.add_space(8.0);
@@ -472,7 +488,9 @@ impl ShellApp {
                                 line.push_str(&format!(", {} could not be read", folder.failed));
                             }
                             if !folder.present {
-                                line.push_str(" -- folder is missing; its records are kept until it returns");
+                                line.push_str(
+                                    " -- folder is missing; its records are kept until it returns",
+                                );
                             }
                             ui.weak(line);
                         });
@@ -488,10 +506,12 @@ impl ShellApp {
                             {
                                 remove = Some(folder.path.clone());
                             }
-                            if folder.present && ui.button("Reveal").clicked() {
-                                if let Err(message) = services::open_path(std::path::Path::new(&folder.path)) {
-                                    self.say_error(message);
-                                }
+                            if folder.present
+                                && ui.button("Reveal").clicked()
+                                && let Err(message) =
+                                    services::open_path(std::path::Path::new(&folder.path))
+                            {
+                                self.say_error(message);
                             }
                         });
                     });
@@ -520,7 +540,11 @@ impl ShellApp {
                 egui::TextEdit::singleline(&mut self.search.extension_filter).hint_text("pdf, md"),
             )
             .on_hover_text("Only these file types (comma separated)");
-            if ui.add_sized([100.0, 28.0], egui::Button::new("Search")).clicked() || submitted {
+            if ui
+                .add_sized([100.0, 28.0], egui::Button::new("Search"))
+                .clicked()
+                || submitted
+            {
                 self.start_search(ctx);
             }
         });
@@ -614,7 +638,9 @@ impl ShellApp {
             );
             let submitted = response.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
             if ui
-                .add_enabled_ui(!self.ask.asking, |ui| ui.add_sized([100.0, 28.0], egui::Button::new("Ask")))
+                .add_enabled_ui(!self.ask.asking, |ui| {
+                    ui.add_sized([100.0, 28.0], egui::Button::new("Ask"))
+                })
                 .inner
                 .clicked()
                 || (submitted && !self.ask.asking)
@@ -966,7 +992,7 @@ fn style(ctx: &egui::Context) {
     visuals.selection.bg_fill = REDROB_BLUE;
     visuals.hyperlink_color = egui::Color32::from_rgb(0x7F, 0x9B, 0xFF);
     ctx.set_visuals(visuals);
-    ctx.style_mut(|style| {
+    ctx.all_styles_mut(|style| {
         style.spacing.item_spacing = egui::vec2(8.0, 6.0);
         style.spacing.button_padding = egui::vec2(10.0, 4.0);
     });
@@ -1017,7 +1043,11 @@ fn sources_list(
         egui::Frame::group(ui.style()).show(ui, |ui| {
             ui.set_width(ui.available_width());
             ui.horizontal(|ui| {
-                ui.label(egui::RichText::new(format!("[{}]", source.number)).strong().color(REDROB_BLUE));
+                ui.label(
+                    egui::RichText::new(format!("[{}]", source.number))
+                        .strong()
+                        .color(REDROB_BLUE),
+                );
                 ui.label(egui::RichText::new(&source.name).strong());
                 if let Some(page) = source.page {
                     ui.weak(format!("p. {page}"));
@@ -1032,7 +1062,12 @@ fn sources_list(
                 });
             });
             ui.weak(&source.path);
-            ui.label(work::strip_bold(&source.excerpt).chars().take(400).collect::<String>());
+            ui.label(
+                work::strip_bold(&source.excerpt)
+                    .chars()
+                    .take(400)
+                    .collect::<String>(),
+            );
         });
     }
 }

@@ -95,10 +95,10 @@ pub fn search(state: &Library, request: SearchRequest) -> Result<Vec<SearchResul
         {
             continue;
         }
-        if let Some(prefix) = request.filters.path_prefix.as_deref() {
-            if !chunk.path.starts_with(prefix) {
-                continue;
-            }
+        if let Some(prefix) = request.filters.path_prefix.as_deref()
+            && !chunk.path.starts_with(prefix)
+        {
+            continue;
         }
         output.push(SearchResult {
             chunk_id: chunk.id,

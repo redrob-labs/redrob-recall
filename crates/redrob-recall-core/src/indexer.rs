@@ -16,7 +16,7 @@ use qdrant_edge::{
     PointInsertOperations, PointOperations, PointStruct, PointStructPersisted, UpdateOperation,
     Vectors,
 };
-use quick_xml::{events::Event, Reader};
+use quick_xml::{Reader, events::Event};
 use serde_json::json;
 use sha2::{Digest, Sha256};
 use std::{
@@ -80,14 +80,14 @@ pub fn request_index(state: &Library) -> bool {
         state.request_rescan();
         return false;
     }
-    let state = state.clone();
+    let worker = state.clone();
     let spawned = std::thread::Builder::new()
         .name("recall-index".into())
         .spawn(move || {
-            if let Err(error) = run_claimed_full_index(&state) {
+            if let Err(error) = run_claimed_full_index(&worker) {
                 tracing::error!(%error, "indexing failed");
-                state.set_indexing(false);
-                state.changed();
+                worker.set_indexing(false);
+                worker.changed();
             }
         });
     if spawned.is_err() {

@@ -90,7 +90,11 @@ pub fn console_base() -> String {
 
 /// Redrob Launcher's shared account file for this platform.
 pub fn shared_account_path() -> Option<PathBuf> {
-    let env = |key: &str| std::env::var_os(key).filter(|v| !v.is_empty()).map(PathBuf::from);
+    let env = |key: &str| {
+        std::env::var_os(key)
+            .filter(|v| !v.is_empty())
+            .map(PathBuf::from)
+    };
     let dir = if let Some(dir) = env(SHARED_DIR_ENV) {
         dir
     } else if cfg!(windows) {
@@ -188,8 +192,13 @@ impl Watcher {
 
     fn watch_dirs(&mut self) {
         use notify::Watcher as _;
-        let Some(watcher) = self.watcher.as_mut() else { return };
-        for path in [shared_account_path(), own_account_path()].into_iter().flatten() {
+        let Some(watcher) = self.watcher.as_mut() else {
+            return;
+        };
+        for path in [shared_account_path(), own_account_path()]
+            .into_iter()
+            .flatten()
+        {
             if let Some(dir) = path.parent().filter(|dir| dir.is_dir()) {
                 // Watching the same directory twice is refused harmlessly on every backend.
                 let _ = watcher.watch(dir, notify::RecursiveMode::NonRecursive);
