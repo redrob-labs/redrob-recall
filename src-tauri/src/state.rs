@@ -3,6 +3,7 @@ use crate::{
     engine::{Engine, EngineError},
     indexer, local_api,
     models::{AppSettings, AppSnapshot, ConnectionStatus, IndexStatus},
+    shared_account::{self, SharedAccount},
     storage::Storage,
 };
 use anyhow::{Context, Result};
@@ -33,6 +34,12 @@ struct Inner {
     /// What the daemon last said about its sign-in. Snapshots are emitted far too often to ask
     /// the daemon each time, so `refresh_connection` asks and everything else reads this.
     pub connection: RwLock<ConnectionStatus>,
+    /// Redrob Launcher's shared sign-in as last read from its `account.json`; `None` when the
+    /// computer is not signed in that way. Re-read at startup, on every connection refresh and
+    /// whenever the watcher sees the file change.
+    pub shared_account: RwLock<Option<SharedAccount>>,
+    /// Keeps the shared-account directory watch alive; dropped on shutdown.
+    pub shared_account_watcher: Mutex<Option<notify::RecommendedWatcher>>,
     pub indexing: AtomicBool,
     /// Set when an index was asked for while one was already running, so the running pass runs
     /// once more when it finishes instead of the request being dropped.
@@ -103,6 +110,8 @@ impl AppState {
             settings: RwLock::new(settings),
             engine,
             connection: RwLock::new(ConnectionStatus::unknown()),
+            shared_account: RwLock::new(shared_account::read()),
+            shared_account_watcher: Mutex::new(None),
             indexing: AtomicBool::new(false),
             rescan_requested: AtomicBool::new(false),
             paused: AtomicBool::new(false),
@@ -118,6 +127,7 @@ impl AppState {
             state.migrate_legacy_key().await;
             state.refresh_connection().await;
         });
+        self.watch_shared_account();
         if let Err(error) = indexer::configure_watcher(self) {
             tracing::warn!(%error, "file watcher could not start");
         }
@@ -140,6 +150,7 @@ impl AppState {
     pub fn shutdown(&self) {
         self.0.shutting_down.store(true, Ordering::SeqCst);
         self.0.watcher.lock().take();
+        self.0.shared_account_watcher.lock().take();
         self.0.shard.lock().take();
     }
 
@@ -192,9 +203,46 @@ impl AppState {
         &self.0.engine
     }
 
-    /// Asks the daemon whether it is signed in to the Redrob console and remembers the answer.
-    /// Finds or starts the daemon on the way, so a missing engine is reported here first.
+    /// Redrob Launcher's shared sign-in, as last read. `refresh_connection` re-reads it.
+    pub fn shared_account(&self) -> Option<SharedAccount> {
+        self.0.shared_account.read().clone()
+    }
+
+    /// Re-reads the launcher's `account.json` whenever it changes, so a sign-in or sign-out there
+    /// is reflected here while the app is open. Without a watchable directory the file is still
+    /// re-read on every connection refresh (startup, focus, each question).
+    fn watch_shared_account(&self) {
+        let state = self.clone();
+        match shared_account::watch(move || {
+            let state = state.clone();
+            tauri::async_runtime::spawn(async move {
+                state.refresh_connection().await;
+            });
+        }) {
+            Ok(watcher) => *self.0.shared_account_watcher.lock() = watcher,
+            Err(error) => tracing::warn!(%error, "the shared account file could not be watched"),
+        }
+    }
+
+    /// Reads the sign-in this computer has and remembers it. Redrob Launcher's shared sign-in
+    /// counts first: when its file holds a key, this app is signed in with it and asks nothing of
+    /// the daemon. Otherwise the daemon is asked whether it is signed in -- found or started on the
+    /// way, so a missing engine is reported here first.
     pub async fn refresh_connection(&self) -> ConnectionStatus {
+        let shared = shared_account::read();
+        *self.0.shared_account.write() = shared.clone();
+        if let Some(account) = shared {
+            let status = ConnectionStatus {
+                connected: true,
+                key_label: Some(account.label().unwrap_or_else(|| "Redrob Launcher".into())),
+                via_launcher: true,
+                endpoint: account.api_base_url.clone(),
+                error: None,
+            };
+            *self.0.connection.write() = status.clone();
+            self.emit_snapshot();
+            return status;
+        }
         let status = match self.0.engine.account_status().await {
             Ok(account) => ConnectionStatus {
                 connected: account.connected,
@@ -466,6 +514,9 @@ mod tests {
     #[tokio::test]
     async fn the_connection_reads_the_daemon_sign_in_and_hands_keys_to_it() {
         let dir = scratch("engine-connection");
+        // This test is about the daemon path: point the shared-account lookup at an empty
+        // directory so a developer machine signed in through Redrob Launcher does not take over.
+        std::env::set_var("REDROB_SHARED_DIR", dir.join("shared"));
         // The daemon's provider list, as the test moves it along: signed out, then signed in
         // with the launcher's key, then with a key an app handed over.
         let providers = Arc::new(Mutex::new(r#"{"all":[]}"#.to_string()));
@@ -532,6 +583,7 @@ mod tests {
     #[tokio::test]
     async fn a_missing_engine_is_reported_on_the_connection_and_blocks_sign_in() {
         let dir = scratch("engine-missing-connection");
+        std::env::set_var("REDROB_SHARED_DIR", dir.join("shared"));
         let engine = Engine::with_resolver(Arc::new(|| Err(Unavailable::NotInstalled)));
         let state = AppState::open_headless_with_engine(dir.join("data"), engine).unwrap();
         let status = state.refresh_connection().await;

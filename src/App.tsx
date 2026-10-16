@@ -1310,7 +1310,10 @@ function SettingsView({
             <div>
               <strong>
                 {snapshot.connection.viaLauncher
-                  ? "Signed in with Redrob Launcher"
+                  ? snapshot.connection.keyLabel &&
+                    snapshot.connection.keyLabel !== "Redrob Launcher"
+                    ? `Signed in with Redrob Launcher as ${snapshot.connection.keyLabel}`
+                    : "Signed in with Redrob Launcher"
                   : snapshot.connection.connected
                     ? "Connected to Redrob"
                     : "Not connected"}

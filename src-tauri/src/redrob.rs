@@ -1,8 +1,10 @@
-//! Ask: local evidence, then one OpenAI-compatible chat request to the shared Redrob Code daemon.
+//! Ask: local evidence, then one OpenAI-compatible chat request to Redrob.
 //!
-//! The daemon holds the Redrob console key and calls the console; this app never does, and there
-//! is no fallback to the console when the daemon is missing. The request and response shapes are
-//! the console's own, so the daemon forwards them unchanged.
+//! Two ways to Redrob, chosen by what this computer holds. When Redrob Launcher has signed the
+//! computer in (`shared_account`), the request goes to the console named in that file with its key
+//! as the bearer -- the shared-account contract. Otherwise it goes to the shared Redrob Code daemon,
+//! which holds its own console key and forwards the same shapes unchanged. A refusal carries what
+//! Redrob actually said, so the chat shows the reason rather than only its class.
 
 use crate::{
     engine::{self, EngineError},
@@ -71,7 +73,7 @@ impl RedrobError {
         let (code, message, http_status) = match status.as_u16() {
             401 | 403 => (
                 "authentication_required",
-                "Redrob rejected the sign-in Redrob Code holds. Sign in to Redrob again.",
+                "Redrob rejected this computer's sign-in. Sign in to Redrob again.",
                 401,
             ),
             402 => (
@@ -210,8 +212,17 @@ pub async fn ask(state: AppState, request: AskRequest) -> Result<AskResponse, Re
         .join("\n\n");
 
     let settings = state.settings();
+    let shared = state.shared_account();
+    // The daemon resolves `provider/model`; a bare name is looked up under the `redrob` provider
+    // only if the catalog knows it, and `auto` is not in that catalog (measured: 400 "model auto
+    // is not available on this engine"). The console takes `auto` as is.
+    let model = if shared.is_some() {
+        settings.answer_model.clone()
+    } else {
+        daemon_model(&settings.answer_model)
+    };
     let body = ChatRequest {
-        model: settings.answer_model.clone(),
+        model,
         temperature: 0.2,
         messages: vec![
             ChatMessage {
@@ -225,11 +236,18 @@ pub async fn ask(state: AppState, request: AskRequest) -> Result<AskResponse, Re
         ],
     };
     let started = std::time::Instant::now();
-    let response = state
-        .engine()
-        .chat_completions(&body)
-        .await
-        .map_err(RedrobError::from_engine)?;
+    // Redrob Launcher's shared sign-in is spent where its file says (the console, as a bearer);
+    // without it the shared Redrob Code daemon answers with its own credential.
+    let response = match &shared {
+        Some(account) => {
+            state
+                .engine()
+                .console_chat_completions(account, &body)
+                .await
+        }
+        None => state.engine().chat_completions(&body).await,
+    }
+    .map_err(RedrobError::from_engine)?;
     let status = response.status();
     let retry_after_seconds = response
         .headers()
@@ -237,19 +255,21 @@ pub async fn ask(state: AppState, request: AskRequest) -> Result<AskResponse, Re
         .and_then(|value| value.to_str().ok())
         .and_then(|value| value.parse().ok());
     if !status.is_success() {
+        let body = response.bytes().await.unwrap_or_default();
         // The one 401 that means "sign in": the daemon itself holds no console credential. Read
         // from the error code, never the message, which is localized.
-        if status == StatusCode::UNAUTHORIZED {
-            let body = response.bytes().await.unwrap_or_default();
-            if engine::names_engine_not_authenticated(&body) {
-                return Err(RedrobError::new(
-                    "not_connected",
-                    "Sign in to Redrob before asking.",
-                    401,
-                ));
-            }
+        if status == StatusCode::UNAUTHORIZED
+            && shared.is_none()
+            && engine::names_engine_not_authenticated(&body)
+        {
+            return Err(RedrobError::new(
+                "not_connected",
+                "Sign in to Redrob before asking.",
+                401,
+            ));
         }
-        return Err(RedrobError::from_response(status, retry_after_seconds));
+        return Err(RedrobError::from_response(status, retry_after_seconds)
+            .with_detail(upstream_error_message(&body)));
     }
     if response
         .content_length()
@@ -317,6 +337,63 @@ pub async fn ask(state: AppState, request: AskRequest) -> Result<AskResponse, Re
 
 fn truncate_chars(value: &str, maximum: usize) -> String {
     value.chars().take(maximum).collect()
+}
+
+/// The provider id the daemon routes console models under.
+const DAEMON_PROVIDER_PREFIX: &str = "redrob/";
+
+/// The model name as the daemon wants it: `provider/model`. A bare name (`auto`, the default) is
+/// the console's, so it gets the `redrob/` prefix; a name that already carries a provider is sent
+/// as is, which is how a locally served model stays reachable from the setting.
+fn daemon_model(model: &str) -> String {
+    let model = model.trim();
+    if model.contains('/') {
+        model.to_string()
+    } else {
+        format!("{DAEMON_PROVIDER_PREFIX}{model}")
+    }
+}
+
+/// How much of an upstream error message is shown before it is cut.
+const MAX_DETAIL_CHARACTERS: usize = 400;
+
+/// The message inside an OpenAI-style error envelope (`{"error":{"message":...}}`), or the body
+/// itself when it is short plain text. `None` for an empty or unreadable body. Shown to the person
+/// so a refusal says why; the key is never in a response body, so nothing here needs redacting.
+fn upstream_error_message(body: &[u8]) -> Option<String> {
+    let text = std::str::from_utf8(body).ok()?.trim();
+    if text.is_empty() {
+        return None;
+    }
+    let message = serde_json::from_str::<serde_json::Value>(text)
+        .ok()
+        .and_then(|value| {
+            value
+                .pointer("/error/message")
+                .or_else(|| value.get("message"))
+                .or_else(|| value.get("error"))
+                .and_then(|value| value.as_str().map(str::to_owned))
+        })
+        .unwrap_or_else(|| text.to_string());
+    let message = message.split_whitespace().collect::<Vec<_>>().join(" ");
+    if message.is_empty() {
+        return None;
+    }
+    Some(if message.chars().count() > MAX_DETAIL_CHARACTERS {
+        format!("{}…", truncate_chars(&message, MAX_DETAIL_CHARACTERS))
+    } else {
+        message
+    })
+}
+
+impl RedrobError {
+    /// Appends what Redrob actually said, so the chat shows the reason and not only the class.
+    fn with_detail(mut self, detail: Option<String>) -> Self {
+        if let Some(detail) = detail {
+            self.message = format!("{} (Redrob said: {detail})", self.message);
+        }
+        self
+    }
 }
 
 #[derive(Serialize)]

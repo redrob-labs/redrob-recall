@@ -10,6 +10,7 @@
 //! starts the daemon when none answers (`REDROB_CODE_BIN`, `~/.redrob/bin/redrob`, `redrob` on
 //! PATH). Its calls block, so they run off the async runtime here.
 
+use crate::shared_account::SharedAccount;
 use parking_lot::Mutex;
 use redrob_engine_client::{app_headers, openai_base, Record, Unavailable};
 use reqwest::{header::HeaderValue, StatusCode};
@@ -291,6 +292,32 @@ impl Engine {
                 .json(body)
         })
         .await
+    }
+
+    /// `POST <apiBaseUrl>/chat/completions` with Redrob Launcher's shared key as the bearer: the
+    /// shared-account contract's own path, used when the launcher has signed this computer in. The
+    /// same OpenAI-compatible shape; the app and session labels travel as on the daemon path.
+    pub async fn console_chat_completions<T: serde::Serialize>(
+        &self,
+        account: &SharedAccount,
+        body: &T,
+    ) -> Result<reqwest::Response, EngineError> {
+        let mut authorization = HeaderValue::from_str(&format!("Bearer {}", account.api_key))
+            .map_err(|_| {
+                EngineError::Unavailable(Unavailable::StartFailed(
+                    "the shared Redrob key contains characters that cannot be sent".into(),
+                ))
+            })?;
+        authorization.set_sensitive(true);
+        Ok(self
+            .http
+            .post(account.endpoint("chat/completions"))
+            .header("Authorization", authorization)
+            .header("x-redrob-app", APP_NAME)
+            .header("x-redrob-session", &self.session)
+            .json(body)
+            .send()
+            .await?)
     }
 
     /// Whether the daemon is signed in to the Redrob console (`GET /provider`), and with whose key.

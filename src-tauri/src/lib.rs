@@ -7,6 +7,7 @@ mod models;
 mod query;
 mod redrob;
 mod search;
+mod shared_account;
 mod state;
 mod storage;
 
