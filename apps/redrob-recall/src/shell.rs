@@ -90,6 +90,7 @@ pub struct ShellApp {
     settings_draft: AppSettings,
     settings_dirty: bool,
     account: Option<account::Account>,
+    account_watcher: account::Watcher,
     account_checked: Instant,
     search: SearchScreen,
     ask: AskScreen,
@@ -122,6 +123,10 @@ impl ShellApp {
             settings_draft,
             settings_dirty: false,
             account: account::current(),
+            account_watcher: account::Watcher::start({
+                let ctx = ctx.clone();
+                move || ctx.request_repaint()
+            }),
             account_checked: Instant::now(),
             search: SearchScreen {
                 query: String::new(),
@@ -916,7 +921,13 @@ impl eframe::App for ShellApp {
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         self.refresh();
         self.drain_jobs();
-        if self.account_checked.elapsed() > Duration::from_secs(5) {
+        // The shared sign-in can change under us (a sign-in or sign-out in Redrob Launcher): the
+        // watcher says when; a slow timer covers a directory that did not exist when it started.
+        if self.account_watcher.take() {
+            self.account = account::current();
+            self.account_checked = Instant::now();
+        } else if self.account_checked.elapsed() > Duration::from_secs(30) {
+            self.account_watcher.rearm();
             self.account = account::current();
             self.account_checked = Instant::now();
         }

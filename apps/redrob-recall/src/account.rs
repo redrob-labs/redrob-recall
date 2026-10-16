@@ -6,6 +6,10 @@
 
 use serde::Deserialize;
 use std::path::PathBuf;
+use std::sync::{
+    Arc,
+    atomic::{AtomicBool, Ordering},
+};
 
 pub const CONSOLE_API: &str = "https://console.redrob.ai/api/backend/v1";
 /// Overrides the shared account file's directory (Redrob Launcher's `REDROB_SHARED_DIR`).
@@ -148,4 +152,64 @@ pub fn current() -> Option<Account> {
             stored,
             source: Source::Shared,
         })
+}
+
+/// Watches the shared and the own `account.json` for a sign-in or sign-out while the window is
+/// open (the contract's rule 2: read when needed, not once at start-up). The directories are
+/// watched, not the files, because the launcher writes through a temporary file renamed over the
+/// old one, and a watch on the old inode would go stale after the first rename.
+pub struct Watcher {
+    changed: Arc<AtomicBool>,
+    watcher: Option<notify::RecommendedWatcher>,
+}
+
+impl Watcher {
+    /// Start watching; `wake` is called from the watcher thread when a file changed (the shell asks
+    /// egui to repaint from it). Directories that do not exist yet are retried at every `take`.
+    pub fn start(wake: impl Fn() + Send + Sync + 'static) -> Self {
+        let changed = Arc::new(AtomicBool::new(false));
+        let flag = changed.clone();
+        let watcher = notify::recommended_watcher(move |result: notify::Result<notify::Event>| {
+            let Ok(event) = result else { return };
+            let touches_account = event.paths.iter().any(|path| {
+                path.file_name()
+                    .is_some_and(|name| name.to_string_lossy().starts_with("account"))
+            });
+            if touches_account || event.paths.is_empty() {
+                flag.store(true, Ordering::Relaxed);
+                wake();
+            }
+        })
+        .ok();
+        let mut this = Self { changed, watcher };
+        this.watch_dirs();
+        this
+    }
+
+    fn watch_dirs(&mut self) {
+        use notify::Watcher as _;
+        let Some(watcher) = self.watcher.as_mut() else { return };
+        for path in [shared_account_path(), own_account_path()].into_iter().flatten() {
+            if let Some(dir) = path.parent().filter(|dir| dir.is_dir()) {
+                // Watching the same directory twice is refused harmlessly on every backend.
+                let _ = watcher.watch(dir, notify::RecursiveMode::NonRecursive);
+            }
+        }
+    }
+
+    /// Whether a change was seen since the last call. Also re-arms the watch on directories that
+    /// have appeared since (the launcher creates the shared folder at the first sign-in).
+    pub fn take(&mut self) -> bool {
+        let changed = self.changed.swap(false, Ordering::Relaxed);
+        if !changed {
+            return false;
+        }
+        self.watch_dirs();
+        true
+    }
+
+    /// Re-arm directory watches (for a slow timer, when a directory may have been created).
+    pub fn rearm(&mut self) {
+        self.watch_dirs();
+    }
 }
