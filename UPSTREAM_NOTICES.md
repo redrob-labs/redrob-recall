@@ -43,7 +43,7 @@ than what was planned.
 | _(no copied source yet)_ | | | |
 
 **The query language is REIMPLEMENTED, not copied, which is why the table above is still empty.**
-`src-tauri/src/query.rs` answers the same question bloop's `query/grammar.pest` answers -- what does a
+`crates/redrob-recall-core/src/query.rs` answers the same question bloop's `query/grammar.pest` answers -- what does a
 person's search string mean -- and shares no code with it. bloop parses with pest into a Tantivy query;
 this is a hand-written tokeniser and recursive-descent parser producing an FTS5 `MATCH` expression. The
 grammar it implements is a reduced version of bloop's, and the reductions are recorded in

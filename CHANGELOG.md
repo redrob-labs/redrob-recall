@@ -2,12 +2,20 @@
 
 All notable changes to Redrob Recall are documented here.
 
-## [Unreleased]
+## 0.4.0 - 2026-10-16
 
 ### Changed
 
-- The release workflow uses the shared redrob-labs pieces: `gitflow.yml` calls the org's reusable workflow (one branch-type list, automatic back-merge pull request); Windows installers are Authenticode-signed through Azure Artifact Signing with the job's OpenID Connect login and the shared `sign.ps1` as Tauri's sign command (no certificate file, no `WIN_CSC_*` secrets, `signtool verify /pa` must read Valid from `McKinley Rice, Inc.`); and the release is created and **published as latest** by the shared `release-publish` workflow, which also writes `SHA256SUMS.txt` and `redrob-launcher.json`. Nothing is drafted for a human to publish any more; a version with a `-` suffix publishes as a pre-release, which `latest` skips.
-- Each build leg stages its bundles under the Redrob Launcher names and writes its updater entries with the published download URLs; the `updater-manifest` job assembles `latest.json` from them and verifies every signature against the staged bytes before anything is published. The draft-release asset renamer, URL rewriter, manifest writer and release checker scripts are gone. `workflow_dispatch` with a version is a dry run. Build legs run in parallel. The `WINDOWS_SIGNING_READY` variable is no longer read. No application change.
+- **Rewritten as a Rust egui/wgpu application on a reusable memory layer.** The Tauri + React app is replaced outright on `develop`: a Cargo workspace in the redrob-canvas shape with `crates/redrob-recall-core` (extraction, chunking, SQLite + FTS5 keyword index, local multilingual embeddings in Qdrant Edge, hybrid search, folder watcher, library store: the Tauri app's engine modules promoted unchanged, with their tests), `crates/redrob-recall-api` (the loopback HTTP API and a typed Rust client) and `apps/redrob-recall` (an eframe window with Library, Search, Ask and Settings screens, plus `serve`, `index <dir>` and `search <query>` subcommands). Recall is first of all the local memory the other Redrob apps call; the window is a thin client on it.
+- **Ask calls the Redrob console directly** (`POST {apiBaseUrl}/chat/completions`, model `auto`) with the account Redrob Launcher signed this computer in with, read from the launcher's shared `account.json` (`REDROB_API_KEY` or Recall's own `account.json` win over it) and watched for changes while the window is open. The Redrob Code daemon is no longer involved and is not required. The console's own error message is shown when a request fails, with the locally found sources beneath. There is no sign-in UI of Recall's own beyond "Open Redrob Launcher".
+- **The local API** gains `GET /v1/status`, `POST /v1/ask-context` (the numbered evidence and the prompts, for a caller that talks to its own model), `POST`/`DELETE /v1/folders` and `POST /v1/index`, `/v1/index/pause`; `POST /v1/ask` is gone (Recall no longer holds a key to answer with). The bound address is written to `<data dir>/local-api-address` so a client finds the server without configuration. `docs/API.md` is the contract.
+- **Releases** are built by the redrob-canvas release workflow shape: exactly three targets (Linux x86_64 `.tar.gz` + `.deb`, macOS arm64 `.dmg` + `.zip`, Windows x64 `-portable.zip` + `-setup.exe`), `SHA256SUMS.txt` and `redrob-launcher.json` through the shared redrob-labs publish job. The Windows setup is the branded native installer with an English / Korean language page; the macOS disk image carries an uninstaller. The Tauri updater, its signing keys and `latest.json` are gone: Redrob Launcher updates the app. Brand assets are built from the design system by `scripts/build-brand-assets.py` and pinned in `brand/SOURCES.json`.
+- CI is one pull-request workflow: a seconds-long scripts job (brand pins, version) and one Rust job (fmt, clippy, the tests of our crates, `--profile ci`), skipped when no Rust input changed or when the pull request targets `main`.
+- Data stays in `~/.redrob/recall` and an existing index is read as is (`REDROB_RECALL_DATA_DIR` overrides the folder).
+
+### Removed
+
+- The web frontend (`src/`, Vite, TypeScript, npm), the end-to-end WebDriver tests, the Node release scripts, the Redrob Code engine client, the in-app key paste, the credential-manager key.
 
 ## [0.3.2] - 2026-10-14
 

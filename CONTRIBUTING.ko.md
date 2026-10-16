@@ -74,13 +74,10 @@ hotfix도 같은 모양인데, `hotfix/*`를 `develop`이 아니라 `main`에서
 git switch develop && git pull
 git switch -c fix/short-description
 
-npm install
-npm run check
-npm run build
-
 cargo fmt --all
-cargo clippy --all-targets -- -D warnings
-cargo test --workspace
+cargo clippy -p redrob-recall -p redrob-recall-core -p redrob-recall-api --all-targets --profile ci -- -D warnings
+cargo test -p redrob-recall-core -p redrob-recall-api --profile ci
+python3 scripts/check-brand.py && python3 scripts/check-version.py
 
 # open a pull request into develop
 ```
@@ -101,12 +98,8 @@ request도 이 저장소의 브랜치와 같은 검사를 받습니다.
 
 | 검사 | 실행 내용 |
 | --- | --- |
-| **Verify source and desktop core** | `npm ci` 다음 `npm run verify` — 전체 빌드, 포매팅, 테스트, Clippy |
-| **Rust security advisories** | lockfile로 고정된 의존성 집합에 대한 `cargo audit` |
-
-advisory 스캔은 매일 바뀌는 데이터베이스를 읽으므로, 의존성을 건드리지 않은 브랜치에서도 빨갛게 될
-수 있습니다. 내 탓이라고 단정하기 전에 `develop`의 같은 잡을 확인하세요. 실제 발견이라면 advisory를
-허용하지 말고 crate를 올립니다.
+| **brand pins, version** | `scripts/check-brand.py`(모든 아이콘·락업이 디자인 시스템 핀과 바이트 단위로 같음)와 `scripts/check-version.py`(워크스페이스 버전에 날짜가 붙은 CHANGELOG 절이 있음); 몇 초 |
+| **fmt, clippy, test (profile ci)** | `cargo fmt --check`, `cargo clippy ... -D warnings`, 우리 크레이트 셋의 테스트를 `--profile ci`로; Rust 입력이 바뀌지 않았거나 PR이 `main`을 향하면 건너뜀 |
 
 **`release.yml`**은 태그가 붙으면 빌드하고 배포합니다. 구조상 메인테이너 전용입니다. `push: tags`로
 발동하고, 태그 커밋이 `main`의 조상인지 검증하며, 자격증명을 쓰는 잡은 `release` 환경
@@ -114,7 +107,7 @@ advisory 스캔은 매일 바뀌는 데이터베이스를 읽으므로, 의존�
 넣은 `workflow_dispatch`는 아무것도 발행하지 않는 드라이런입니다. 이 조상 검사가 브랜치 모델을 실제로 만들어 줍니다. `develop`에서 뗀 태그는 출시되는
 대신 거부됩니다.
 
-push 전에 `npm run check`와 `cargo test --workspace`를 돌리세요.
+push 전에 위의 네 명령을 돌리세요.
 
 ## 의존성 업데이트
 
@@ -123,8 +116,8 @@ Dependabot **버전 업데이트는 꺼져 있습니다**. 상시로 pull reques
 
 - **Dependabot 보안 업데이트는 켜져 있습니다.** 알려진 취약점이 있는 의존성에 대해서는 여전히
   pull request가 자동으로 열립니다. 사람을 방해할 가치가 있는 쪽은 이것입니다.
-- **advisory 잡이 모든 pull request를 막습니다.** `cargo audit`이 커밋된 lockfile을 검사하므로,
-  아무도 알림을 읽지 않아도 취약한 의존성은 머지되지 않습니다. 보안 업데이트는 알림이고, 이것이 통제입니다.
+- **릴리스 전에 `cargo audit`을 돌립니다.** CI는 얇게 유지하므로(스크립트 잡 하나, Rust 잡 하나),
+  의존성 advisory는 릴리스 컷 전에 lockfile에 대해 한 번 확인합니다.
 
 그래서 일상적인 버전 올리기는 의도적으로 합니다. 지금 하는 변경에 필요한 것만 같은 pull request에서
 올리고, 이유를 본문에 적으세요. 관련 없는 버전 변경을 기능 브랜치에 쓸어 담지 않습니다.
