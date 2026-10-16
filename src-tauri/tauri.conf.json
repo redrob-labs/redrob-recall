@@ -32,6 +32,8 @@
     "targets": "all",
     "createUpdaterArtifacts": false,
     "category": "Productivity",
+    "publisher": "Redrob",
+    "homepage": "https://redrob.ai",
     "shortDescription": "Private search for everything on your computer",
     "longDescription": "Redrob Recall indexes files locally so you can search and ask across everything on your computer without uploading your library.",
     "copyright": "Copyright © 2026 Janghoon Lee (Redrob) and contributors",
@@ -53,7 +55,11 @@
     "windows": {
       "nsis": {
         "installMode": "currentUser",
-        "displayLanguageSelector": false
+        "installerIcon": "icons/icon.ico",
+        "headerImage": "installer/nsis-header.bmp",
+        "sidebarImage": "installer/nsis-sidebar.bmp",
+        "languages": ["English", "Korean"],
+        "displayLanguageSelector": true
       }
     }
   }
