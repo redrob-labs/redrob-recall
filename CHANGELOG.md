@@ -2,6 +2,12 @@
 
 All notable changes to Redrob Recall are documented here.
 
+## 0.6.0 - 2026-10-17
+
+### Added
+
+- **The window serves its tools to Redrob Code.** While it is open, Recall registers with the shared Redrob Code daemon on loopback as MCP server `app:recall` (through `redrob-app-bridge`, pinned to redrob-code v0.7.0), so the agent in any Redrob surface can drive it: `status`, `list_sources`, `add_source {path}`, `remove_source {path}`, `reindex {source?}` (answers a job id), `index_status {job_id?}`, `search {query, limit?}` (ranked hits, shown in the Search view too) and `open_hit {id, open?}`. Requests that touch window state run once per frame through the same code paths the UI uses; the search itself runs off the UI thread. A daemon that cannot be reached is logged and the window runs as before. README: a "Control from Redrob Code" section lists the tools.
+
 ## 0.5.0 - 2026-10-16
 
 ### Changed
