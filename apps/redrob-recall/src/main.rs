@@ -10,6 +10,7 @@
 #![cfg_attr(all(windows, not(debug_assertions)), windows_subsystem = "windows")]
 
 mod account;
+mod app_bridge;
 mod console;
 mod i18n;
 mod prefs;
