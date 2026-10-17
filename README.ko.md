@@ -73,6 +73,21 @@ curl -X POST "$BASE/v1/ask-context" -H "Authorization: Bearer $TOKEN" -H "Conten
 Rust에서는 `redrob-recall-api`를 `client` 기능으로 의존하고 `RecallClient::discover()`를 호출합니다.
 모든 경로는 [docs/API.md](docs/API.md)에 있습니다.
 
+## Redrob Code에서 제어
+
+창이 열려 있는 동안 공유 Redrob Code 데몬에 루프백으로 도구를 내어 주므로, 어느 Redrob 표면의
+에이전트든(휴대폰 채팅까지) MCP 서버 `app:recall`로 이 도구들을 봅니다. 데몬이 없으면 창은
+그대로 동작합니다.
+
+- `status` -- 인덱스 디렉터리, 문서·구절 수, 인덱스 상태, 마지막 패스, 로컬 API 응답 여부.
+- `list_sources` -- 라이브러리 폴더와 각 폴더의 인덱싱된·실패한 파일 수.
+- `add_source {path}` -- 폴더를 추가하고 바로 읽기 시작.
+- `remove_source {path}` -- 폴더를 빼고 그 아래 인덱싱한 내용을 지움.
+- `reindex {source?}` -- 라이브러리 패스를 시작(또는 대기열에 넣음); 작업 id를 답함.
+- `index_status {job_id?}` -- 패스의 상태와 진행, 해당 작업이 끝났는지.
+- `search {query, limit?}` -- 순위 매긴 결과(id, 점수, 원본 경로, 발췌); 검색 화면에도 표시.
+- `open_hit {id, open?}` -- 마지막 검색 결과 하나를 창에서 선택; `open`이면 파일도 엶.
+
 ## 개발 실행
 
 Rust 1.95.0(`rust-toolchain.toml`이 고름). Linux에서는 egui·wgpu·rfd가 링크하는 X11/Wayland/GL

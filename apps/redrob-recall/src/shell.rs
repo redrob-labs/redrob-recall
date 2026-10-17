@@ -16,7 +16,7 @@
 use crate::i18n::{self, t, tf};
 use crate::prefs::UiPrefs;
 use crate::theme::{self, ThemeKind, ThemePref, Tokens};
-use crate::{account, services, work};
+use crate::{account, app_bridge, services, work};
 use redrob_recall_core::{
     AnswerSource, AppSettings, AskResponse, DocumentRecord, IndexProgress, IndexStatus, Library,
     LibrarySnapshot, SearchFilters, SearchResult,
@@ -157,6 +157,8 @@ pub struct ShellApp {
     library: Library,
     runtime: tokio::runtime::Handle,
     jobs: work::Jobs,
+    /// The Redrob Code app bridge: its requests are drained once per frame.
+    bridge: app_bridge::Bridge,
     view: View,
     snapshot: Option<LibrarySnapshot>,
     progress: Option<IndexProgress>,
@@ -198,10 +200,13 @@ impl ShellApp {
         let language = i18n::Language::new(&prefs.language);
         i18n::set_current(language.effective());
         let settings_draft = library.settings();
+        // The daemon is optional; a start that fails is logged inside and the window runs alone.
+        let bridge = app_bridge::Bridge::start(library.clone(), ctx);
         let mut app = Self {
             library,
             runtime,
             jobs: work::Jobs::new(),
+            bridge,
             view: View::default(),
             snapshot: None,
             progress: None,
@@ -343,6 +348,105 @@ impl ShellApp {
 
     fn say(&mut self, text: impl Into<String>) {
         self.post(text.into(), false);
+    }
+
+    /// Run what the Redrob Code agent asked for since the last frame, with the same functions the
+    /// UI uses, and answer each request with a short line.
+    fn drain_bridge(&mut self) {
+        for app_bridge::BridgeRequest { request, reply } in self.bridge.drain() {
+            let answer = self.run_bridge_request(request);
+            // A handler that stopped waiting has dropped its receiver; nothing to tell it.
+            let _ = reply.send(answer);
+        }
+    }
+
+    fn run_bridge_request(&mut self, request: app_bridge::Request) -> app_bridge::Reply {
+        use app_bridge::Request;
+        match request {
+            Request::AddSource { path } => {
+                let folder = PathBuf::from(&path);
+                if !folder.is_dir() {
+                    return Err(format!("{path} is not a folder"));
+                }
+                if let Err(message) = self.library.add_folder(&path) {
+                    self.say_error(message.clone());
+                    return Err(message);
+                }
+                self.say(tf("Added {path}", &[("path", &path)]));
+                self.view = View::Library;
+                Ok(format!("added {path}; reading it now"))
+            }
+            Request::RemoveSource { path } => {
+                self.remove_folder(&path);
+                // `remove_folder` reports through the dock; read the outcome from the settings.
+                let still_there = self
+                    .library
+                    .settings()
+                    .library_paths
+                    .iter()
+                    .any(|candidate| candidate == &path);
+                if still_there {
+                    Err(self
+                        .status
+                        .as_ref()
+                        .map(|s| s.text.clone())
+                        .unwrap_or_else(|| format!("{path} could not be removed")))
+                } else {
+                    Ok(format!("removed {path}"))
+                }
+            }
+            Request::Reindex => {
+                let started = self.library.request_index();
+                self.say(if started {
+                    t("Re-reading your library")
+                } else {
+                    t("Queued behind the running pass")
+                });
+                Ok(if started {
+                    "started".to_string()
+                } else {
+                    "queued behind the running pass".to_string()
+                })
+            }
+            Request::ShowResults { query, results } => {
+                self.search.pending_since = None;
+                self.search.generation += 1;
+                self.search.searching = false;
+                self.search.error = None;
+                self.search.query = query.clone();
+                self.search.searched_for = query;
+                self.search.selected = if results.is_empty() { None } else { Some(0) };
+                self.search.scroll_to_selected = true;
+                let count = results.len();
+                self.search.results = results;
+                self.view = View::Search;
+                Ok(format!("showing {count} results"))
+            }
+            Request::OpenHit { id, open } => {
+                let Some(index) = self
+                    .search
+                    .results
+                    .iter()
+                    .position(|result| result.chunk_id == id)
+                else {
+                    return Err(format!(
+                        "no hit with id {id} in the last search; run search first"
+                    ));
+                };
+                self.search.selected = Some(index);
+                self.search.scroll_to_selected = true;
+                self.view = View::Search;
+                let path = self.search.results[index].path.clone();
+                if open {
+                    self.library
+                        .validated_source(&path)
+                        .and_then(|source| services::open_path(&source))?;
+                    Ok(format!("selected and opened {path}"))
+                } else {
+                    Ok(format!("selected {path}"))
+                }
+            }
+        }
     }
 
     fn say_error(&mut self, text: impl Into<String>) {
@@ -2256,12 +2360,19 @@ impl ShellApp {
 }
 
 impl eframe::App for ShellApp {
+    /// Unregister from the Redrob Code daemon before the window goes, so the agent loses the tools
+    /// now rather than when the heartbeat lapses.
+    fn on_exit(&mut self) {
+        self.bridge.stop();
+    }
+
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         let ctx = ui.ctx().clone();
         i18n::set_current(self.language.effective());
         self.sync_theme(&ctx);
         self.refresh();
         self.drain_jobs();
+        self.drain_bridge();
         self.poll_search_debounce(&ctx);
         // The shared sign-in can change under us (a sign-in or sign-out in Redrob Launcher): the
         // watcher says when; a slow timer covers a directory that did not exist when it started,

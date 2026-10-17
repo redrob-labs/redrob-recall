@@ -78,6 +78,21 @@ curl -X POST "$BASE/v1/ask-context" -H "Authorization: Bearer $TOKEN" -H "Conten
 From Rust, depend on `redrob-recall-api` with the `client` feature and call
 `RecallClient::discover()`. [docs/API.md](docs/API.md) has every route.
 
+## Control from Redrob Code
+
+While the window is open it serves its tools to the shared Redrob Code daemon on loopback, so the
+agent in any Redrob surface (a phone chat included) sees them as MCP server `app:recall`. Without
+the daemon the window runs as before.
+
+- `status` -- the index directory, document and passage counts, the index state, the last pass, whether the local API answers.
+- `list_sources` -- the library folders with their indexed and failed file counts.
+- `add_source {path}` -- add a folder and start reading it.
+- `remove_source {path}` -- remove a folder and forget what was indexed under it.
+- `reindex {source?}` -- start (or queue) a pass over the library; answers a job id.
+- `index_status {job_id?}` -- the pass's state and progress, and whether that job has finished.
+- `search {query, limit?}` -- ranked hits (id, score, source path, snippet), shown in the Search view too.
+- `open_hit {id, open?}` -- select a hit from the last search in the window; `open` also opens the file.
+
 ## Run for development
 
 Rust 1.95.0 (selected by `rust-toolchain.toml`). On Linux the window links against the X11/Wayland/GL
